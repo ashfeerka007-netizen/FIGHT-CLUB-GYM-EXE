@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",
-    "build:exe": "node build-exe.js"
+    "build:exe": "node build-exe.js",
+    "build:installer": "node build-installer.js",
+    "build": "node build-installer.js"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -14,6 +14,7 @@ namespace FightClubGym
         private static NotifyIcon notifyIcon;
         private static string appDir;
         private static string serverUrl = "http://localhost:5000";
+        private static int serverPort = 5000;
 
         [STAThread]
         static void Main()
@@ -21,9 +22,9 @@ namespace FightClubGym
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            appDir = AppDomain.CurrentDomain.BaseDirectory;
+            appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-            bool portActive = IsPortInUse(5000);
+            bool portActive = IsPortInUse(serverPort);
 
             if (!portActive)
             {
@@ -55,13 +56,20 @@ namespace FightClubGym
 
             // Context Menu
             ContextMenu contextMenu = new ContextMenu();
-            MenuItem openItem = new MenuItem("Open Fight Club Gym", (s, e) => OpenBrowser());
+            MenuItem openItem = new MenuItem("⚡ Open Fight Club Gym", (s, e) => OpenBrowser());
             openItem.DefaultItem = true;
-            MenuItem restartItem = new MenuItem("Restart Server", (s, e) => RestartServer());
-            MenuItem exitItem = new MenuItem("Exit App", (s, e) => ExitApp());
+            Font boldFont = new Font(openItem.Text, 9.0f, FontStyle.Bold);
+
+            MenuItem restartItem = new MenuItem("🔄 Restart Server", (s, e) => RestartServer());
+            MenuItem appFolderItem = new MenuItem("📁 Open App Folder", (s, e) => OpenDirectory(appDir));
+            MenuItem dbFolderItem = new MenuItem("💾 Open Database Folder", (s, e) => OpenDirectory(Path.Combine(appDir, "db")));
+            MenuItem exitItem = new MenuItem("❌ Exit Application", (s, e) => ExitApp());
 
             contextMenu.MenuItems.Add(openItem);
             contextMenu.MenuItems.Add(restartItem);
+            contextMenu.MenuItems.Add("-");
+            contextMenu.MenuItems.Add(appFolderItem);
+            contextMenu.MenuItems.Add(dbFolderItem);
             contextMenu.MenuItems.Add("-");
             contextMenu.MenuItems.Add(exitItem);
 
@@ -70,12 +78,15 @@ namespace FightClubGym
 
             if (!portActive)
             {
-                Thread.Sleep(1200);
+                WaitForServerReady(serverPort, 10000);
             }
 
             OpenBrowser();
 
             notifyIcon.ShowBalloonTip(3000, "Fight Club Gym Started", "System is running at " + serverUrl, ToolTipIcon.Info);
+
+            Application.ApplicationExit += (s, e) => StopNodeServer();
+            AppDomain.CurrentDomain.ProcessExit += (s, e) => StopNodeServer();
 
             Application.Run();
         }
@@ -87,7 +98,7 @@ namespace FightClubGym
                 using (TcpClient client = new TcpClient())
                 {
                     var result = client.BeginConnect("127.0.0.1", port, null, null);
-                    bool success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(500));
+                    bool success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(400));
                     if (success)
                     {
                         client.EndConnect(result);
@@ -99,18 +110,47 @@ namespace FightClubGym
             return false;
         }
 
+        private static void WaitForServerReady(int port, int timeoutMs)
+        {
+            int elapsed = 0;
+            int interval = 200;
+            while (elapsed < timeoutMs)
+            {
+                if (IsPortInUse(port))
+                {
+                    return;
+                }
+                Thread.Sleep(interval);
+                elapsed += interval;
+            }
+        }
+
         private static void StartNodeServer()
         {
             string serverFile = Path.Combine(appDir, "server", "index.js");
             if (!File.Exists(serverFile))
             {
-                MessageBox.Show("Could not find server/index.js in: " + appDir, "Fight Club Gym Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Could not find server/index.js in:\n" + appDir, "Fight Club Gym Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
+            }
+
+            // Determine node executable: local bundled first, then bin\node.exe, then system PATH
+            string nodeExe = "node.exe";
+            string localNode = Path.Combine(appDir, "node.exe");
+            string binNode = Path.Combine(appDir, "bin", "node.exe");
+
+            if (File.Exists(localNode))
+            {
+                nodeExe = localNode;
+            }
+            else if (File.Exists(binNode))
+            {
+                nodeExe = binNode;
             }
 
             ProcessStartInfo psi = new ProcessStartInfo
             {
-                FileName = "node.exe",
+                FileName = nodeExe,
                 Arguments = "\"" + serverFile + "\"",
                 WorkingDirectory = appDir,
                 UseShellExecute = false,
@@ -122,16 +162,17 @@ namespace FightClubGym
             {
                 nodeProcess = Process.Start(psi);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                psi.FileName = "node";
+                // Fallback to system node
                 try
                 {
+                    psi.FileName = "node";
                     nodeProcess = Process.Start(psi);
                 }
-                catch
+                catch (Exception sysEx)
                 {
-                    MessageBox.Show("Node.js is not installed or not found in PATH!\nError: " + ex.Message, "Fight Club Gym Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("Failed to launch Node.js server!\n\nTried:\n" + nodeExe + "\n\nError: " + sysEx.Message, "Fight Club Gym Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -152,11 +193,33 @@ namespace FightClubGym
             }
         }
 
+        private static void OpenDirectory(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path))
+                {
+                    Directory.CreateDirectory(path);
+                }
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "\"" + path + "\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Could not open directory: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private static void RestartServer()
         {
             StopNodeServer();
-            Thread.Sleep(1000);
+            Thread.Sleep(800);
             StartNodeServer();
+            WaitForServerReady(serverPort, 5000);
             notifyIcon.ShowBalloonTip(2000, "Fight Club Gym", "Server restarted successfully.", ToolTipIcon.Info);
         }
 
