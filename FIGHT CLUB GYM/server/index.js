@@ -583,7 +583,7 @@ app.post('/api/subscriptions', async (req, res) => {
     const paySql = `INSERT INTO payments (invoice_number, payment_date, member_id, subscription_id, amount, discount, tax, paid_amount, balance, payment_method, remarks)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
                     
-    await db.run(paySql, [
+    const payResult = await db.run(paySql, [
       invoice_number, today, member_id, subscription_id,
       plan.price, plan.discount, plan.tax, plan.final_amount, 0, // Assume paid in full for simplicity
       payment_method || 'Cash', remarks || `Subscription for ${plan.name}`
@@ -593,12 +593,47 @@ app.post('/api/subscriptions', async (req, res) => {
       `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
       [1, 'admin', 'Subscription Created', `Created subscription ID: ${subscription_id} for Member ID: ${member_id}`]
     );
+
+    let whatsappSent = false;
+    let whatsappReason = '';
+    if (req.body.send_whatsapp) {
+      try {
+        const { sendMessage: sendWAService } = require('./whatsapp/service');
+        const member = await db.get('SELECT * FROM members WHERE id = ?', [member_id]);
+        if (member && member.mobile) {
+          const waResult = await sendWAService({
+            memberId: member.id,
+            memberName: member.fullname,
+            mobile: member.mobile,
+            templateKey: 'membership_new',
+            data: {
+              MemberName: member.fullname,
+              MembershipPlan: plan.name,
+              Amount: plan.final_amount,
+              ExpiryDate: expiry_date,
+              ReceiptNo: invoice_number,
+              InvoiceNo: invoice_number,
+              MembershipID: member.member_code || `MEM-${member.id}`
+            },
+            sentBy: 'staff'
+          });
+          whatsappSent = waResult.success;
+          whatsappReason = waResult.reason || waResult.error || '';
+        }
+      } catch (waErr) {
+        console.error('Error sending auto-WhatsApp on subscription create:', waErr.message);
+        whatsappReason = waErr.message;
+      }
+    }
     
     res.status(201).json({
       subscription_id,
+      payment_id: payResult.id,
       expiry_date,
       invoice_number,
-      final_amount: plan.final_amount
+      final_amount: plan.final_amount,
+      whatsappSent,
+      whatsappReason
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

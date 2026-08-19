@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_settings (
     phone_number_id TEXT DEFAULT '',
     business_account_id TEXT DEFAULT '',
     webhook_verify_token TEXT DEFAULT '',
-    enabled INTEGER DEFAULT 0,
+    enabled INTEGER DEFAULT 1,
     default_country_code TEXT DEFAULT '+91',
     message_delay_ms INTEGER DEFAULT 1000,
     retry_attempts INTEGER DEFAULT 3,

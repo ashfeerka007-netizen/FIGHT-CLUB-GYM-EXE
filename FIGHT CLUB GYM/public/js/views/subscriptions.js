@@ -1,6 +1,6 @@
-﻿// Subscription Management View for Fight Club Gym
+// Subscription Management View for Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm } from '../utils.js';
+import { showToast, showConfirm, openWhatsAppWeb } from '../utils.js';
 
 const SubscriptionsView = {
   subscriptions: [],
@@ -66,6 +66,7 @@ const SubscriptionsView = {
                       </td>
                       <td>
                         <div class="flex gap-sm">
+                          <button class="btn btn-success btn-sm btn-wa-sub" data-id="${s.id}" data-member-id="${s.member_id}" data-member-name="${s.member_name}" title="Send WhatsApp Message / Receipt"><i data-lucide="message-square" style="width:12px;height:12px;"></i></button>
                           ${s.status === 'Active' ? `
                             <button class="btn btn-secondary btn-sm btn-freeze" data-id="${s.id}" title="Freeze Membership"><i data-lucide="snowflake" style="width:12px;height:12px;"></i></button>
                             <button class="btn btn-danger btn-sm btn-cancel" data-id="${s.id}" title="Cancel Membership"><i data-lucide="trash-2" style="width:12px;height:12px;"></i></button>
@@ -133,6 +134,13 @@ const SubscriptionsView = {
               <input type="text" id="sub-remarks" placeholder="Optional notes for receipt">
             </div>
 
+            <div class="form-group" style="margin-top: 10px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.875rem;">
+                <input type="checkbox" id="sub-send-whatsapp" checked style="width:16px; height:16px;">
+                <span>Send WhatsApp Receipt & Confirmation to Fighter</span>
+              </label>
+            </div>
+
             <div class="price-breakdown-card mb-md" style="background: rgba(0,0,0,0.1); border:1px solid var(--color-border); border-radius:var(--radius-sm); padding:var(--spacing-md); display:none;" id="sub-price-breakdown">
               <div class="flex justify-between align-center">
                 <span>Final Price (Incl. GST):</span>
@@ -189,12 +197,24 @@ const SubscriptionsView = {
         plan_id: parseInt(document.getElementById('sub-plan').value),
         start_date: document.getElementById('sub-start-date').value,
         payment_method: document.getElementById('sub-paymethod').value,
-        remarks: document.getElementById('sub-remarks').value
+        remarks: document.getElementById('sub-remarks').value,
+        send_whatsapp: document.getElementById('sub-send-whatsapp').checked
       };
       
       try {
         const response = await api.post('/api/subscriptions', payload);
-        showToast(`Subscription activated! Invoice ${response.invoice_number} generated.`, 'success');
+        let msg = `Subscription activated! Invoice ${response.invoice_number} generated.`;
+        if (payload.send_whatsapp && response.payment_id) {
+          try {
+            const receiptRes = await api.post(`/api/whatsapp/send-payment-receipt/${response.payment_id}`);
+            const member = SubscriptionsView.members.find(m => m.id == payload.member_id);
+            openWhatsAppWeb({ mobile: member?.mobile || '', message: receiptRes.messageBody || '' });
+            msg += ` Opening WhatsApp...`;
+          } catch (waErr) {
+            console.error(waErr);
+          }
+        }
+        showToast(msg, 'success');
         
         // Reload SPA view
         const container = document.getElementById('view-container');
@@ -202,6 +222,31 @@ const SubscriptionsView = {
       } catch (err) {
         showToast(err.message, 'error');
       }
+    });
+
+    // Action buttons: WhatsApp
+    document.querySelectorAll('.btn-wa-sub').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const memberId = btn.getAttribute('data-member-id');
+        const memberName = btn.getAttribute('data-member-name');
+        const subId = btn.getAttribute('data-id');
+        
+        const member = SubscriptionsView.members.find(m => m.id == memberId);
+        const mobile = member ? member.mobile : '';
+
+        import('./whatsapp.js').then(module => {
+          module.openWASendModal({
+            memberId,
+            memberName,
+            mobile,
+            prefillTemplate: 'membership_new'
+          });
+        }).catch(err => {
+          showToast('Failed to open WhatsApp dialog: ' + err.message, 'error');
+        });
+      });
     });
     
     // Action buttons: Freeze

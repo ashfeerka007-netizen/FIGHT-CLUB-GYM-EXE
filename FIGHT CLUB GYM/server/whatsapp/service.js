@@ -1,4 +1,4 @@
-﻿// WhatsApp Service — Provider-Agnostic Abstraction Layer
+// WhatsApp Service — Provider-Agnostic Abstraction Layer
 // Fight Club Gym Management System
 
 const crypto = require('crypto');
@@ -45,7 +45,7 @@ function getAdapter(settings) {
 }
 
 // ── Core send function ────────────────────────────────────────────────────────
-async function sendMessage({ memberId, memberName, mobile, templateKey, data = {}, sentBy = 'system' }) {
+async function sendMessage({ memberId, memberName, mobile, templateKey, customMessage, data = {}, sentBy = 'system' }) {
   const settings = await db.get('SELECT * FROM whatsapp_settings WHERE id = 1');
   if (!settings || !settings.enabled) {
     return { success: false, reason: 'WhatsApp notifications are disabled' };
@@ -60,18 +60,28 @@ async function sendMessage({ memberId, memberName, mobile, templateKey, data = {
     return { success: false, reason: `Quiet hours (${qs} – ${qe})` };
   }
 
-  // Load template
-  const tpl = await db.get('SELECT * FROM whatsapp_templates WHERE key = ? AND is_active = 1', [templateKey]);
-  if (!tpl) return { success: false, reason: `Template "${templateKey}" not found or inactive` };
+  let messageBody = '';
+  let notificationType = 'Custom Message';
+  let tplKey = templateKey || 'custom';
 
-  // Resolve placeholders
   const gymSettings = await db.get('SELECT * FROM settings WHERE id = 1');
   const mergedData = {
     GymName: gymSettings?.gym_name || 'Fight Club',
     ContactNumber: gymSettings?.phone || '',
+    MemberName: memberName || 'Member',
     ...data
   };
-  const messageBody = resolvePlaceholders(tpl.body, mergedData);
+
+  if (customMessage) {
+    messageBody = resolvePlaceholders(customMessage, mergedData);
+    notificationType = 'Direct Custom Message';
+  } else {
+    // Load template
+    const tpl = await db.get('SELECT * FROM whatsapp_templates WHERE key = ? AND is_active = 1', [templateKey]);
+    if (!tpl) return { success: false, reason: `Template "${templateKey}" not found or inactive` };
+    notificationType = tpl.name;
+    messageBody = resolvePlaceholders(tpl.body, mergedData);
+  }
 
   // Format mobile with country code
   const countryCode = settings.default_country_code || '+91';
@@ -105,7 +115,7 @@ async function sendMessage({ memberId, memberName, mobile, templateKey, data = {
     `INSERT INTO whatsapp_logs
      (member_id, member_name, mobile, notification_type, template_key, message_body, status, api_response, sent_by, error_message)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [memberId || null, memberName || '', formattedMobile, tpl.name, templateKey, messageBody, status, apiResponse, sentBy, errorMessage]
+    [memberId || null, memberName || '', formattedMobile, notificationType, tplKey, messageBody, status, apiResponse, sentBy, errorMessage]
   );
 
   return { success: status === 'sent', messageBody, status, error: errorMessage };

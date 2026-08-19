@@ -1,4 +1,4 @@
-﻿// Membership Plans Management View for Fight Club Gym
+// Membership Plans Management View for Fight Club Gym
 import api from '../api.js';
 import { showToast, showConfirm } from '../utils.js';
 
@@ -42,6 +42,7 @@ const PlansView = {
                     ${currencySymbol}${p.final_amount}
                   </div>
                   <div class="flex gap-sm justify-end mt-sm">
+                    <button class="btn btn-success btn-sm btn-wa-plan" data-id="${p.id}" data-name="${p.name}" data-price="${p.final_amount}" data-duration="${p.duration_months}" title="Share Plan via WhatsApp"><i data-lucide="message-square" style="width:12px;height:12px;"></i> Share</button>
                     <button class="btn btn-secondary btn-sm btn-edit-plan" data-id="${p.id}" title="Edit Plan"><i data-lucide="edit" style="width:12px;height:12px;"></i></button>
                     <button class="btn btn-danger btn-sm btn-delete-plan" data-id="${p.id}" title="Delete Plan"><i data-lucide="trash" style="width:12px;height:12px;"></i></button>
                   </div>
@@ -194,6 +195,27 @@ const PlansView = {
       cancelEditBtn.classList.add('hidden');
     });
     
+    // Share Plan via WhatsApp
+    document.querySelectorAll('.btn-wa-plan').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const planId = btn.getAttribute('data-id');
+        const plan = PlansView.plans.find(p => p.id == planId);
+        if (!plan) return;
+
+        import('./whatsapp.js').then(module => {
+          module.openWASendModal({
+            memberName: 'Valued Fighter',
+            mobile: '',
+            prefillTemplate: 'new_offer'
+          });
+        }).catch(err => {
+          showToast('Failed to open WhatsApp dialog: ' + err.message, 'error');
+        });
+      });
+    });
+
     // Delete plan buttons
     document.querySelectorAll('.btn-delete-plan').forEach(btn => {
       btn.addEventListener('click', (e) => {

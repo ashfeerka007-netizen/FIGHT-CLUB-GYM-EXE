@@ -1,6 +1,6 @@
-﻿// WhatsApp Notification & Reminder System View — Fight Club Gym
+// WhatsApp Notification & Reminder System View — Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm } from '../utils.js';
+import { showToast, showConfirm, openWhatsAppWeb } from '../utils.js';
 
 const PLACEHOLDERS = [
   'MemberName','MembershipPlan','Amount','DueDate','ExpiryDate',
@@ -28,6 +28,7 @@ const WhatsAppView = {
         </div>
         <div class="wa-tabs">
           <button class="wa-tab active" data-tab="overview"><i data-lucide="layout-dashboard"></i> Overview</button>
+          <button class="wa-tab" data-tab="individual"><i data-lucide="user-check"></i> Individual Send</button>
           <button class="wa-tab" data-tab="templates"><i data-lucide="file-text"></i> Templates</button>
           <button class="wa-tab" data-tab="bulk"><i data-lucide="send"></i> Bulk Send</button>
           <button class="wa-tab" data-tab="logs"><i data-lucide="list"></i> Logs</button>
@@ -62,12 +63,13 @@ const WhatsAppView = {
     content.innerHTML = '<div class="wa-loading"><div class="spinner"></div></div>';
     try {
       switch(tab) {
-        case 'overview':  await WhatsAppView.renderOverview(content); break;
-        case 'templates': await WhatsAppView.renderTemplates(content); break;
-        case 'bulk':      await WhatsAppView.renderBulk(content); break;
-        case 'logs':      await WhatsAppView.renderLogs(content); break;
-        case 'reminders': await WhatsAppView.renderReminders(content); break;
-        case 'settings':  await WhatsAppView.renderSettings(content); break;
+        case 'overview':    await WhatsAppView.renderOverview(content); break;
+        case 'individual':  await WhatsAppView.renderIndividual(content); break;
+        case 'templates':   await WhatsAppView.renderTemplates(content); break;
+        case 'bulk':        await WhatsAppView.renderBulk(content); break;
+        case 'logs':        await WhatsAppView.renderLogs(content); break;
+        case 'reminders':   await WhatsAppView.renderReminders(content); break;
+        case 'settings':    await WhatsAppView.renderSettings(content); break;
       }
     } catch(err) {
       content.innerHTML = `<div class="empty-state"><i data-lucide="alert-triangle"></i><h2>Error</h2><p>${err.message}</p></div>`;
@@ -111,6 +113,206 @@ const WhatsAppView = {
           </div>
         </div>
       </div>`;
+  },
+
+  renderIndividual: async (content) => {
+    const [members, templates] = await Promise.all([
+      api.get('/api/members'),
+      api.get('/api/whatsapp/templates')
+    ]);
+    const activeTemplates = templates.filter(t => t.is_active);
+
+    content.innerHTML = `
+      <div class="wa-individual">
+        <div class="card glass-card">
+          <div class="card-header">
+            <h3><i data-lucide="user-check"></i> Send Individual WhatsApp Message</h3>
+          </div>
+          <div class="card-body">
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label>Select Member (Optional)</label>
+                <select id="ind-member-select">
+                  <option value="">-- Manual Recipient --</option>
+                  ${members.map(m => `<option value="${m.id}" data-name="${m.fullname}" data-mobile="${m.mobile || ''}">${m.fullname} (${m.member_code || 'MEM'} - ${m.mobile || 'No Mobile'})</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Recipient Name</label>
+                <input type="text" id="ind-member-name" placeholder="Member or Customer Name">
+              </div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label>Mobile Number *</label>
+                <input type="text" id="ind-mobile" placeholder="+91 9876543210">
+              </div>
+              <div class="form-group">
+                <label>Message Mode *</label>
+                <select id="ind-msg-mode">
+                  <option value="template">Use WhatsApp Template</option>
+                  <option value="custom">Direct Custom Message</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Template Select Area -->
+            <div id="ind-tpl-area" class="form-group">
+              <label>Select Template</label>
+              <select id="ind-template-select">
+                ${activeTemplates.map(t => `<option value="${t.key}" data-body="${encodeURIComponent(t.body)}">${t.name} (${t.category})</option>`).join('')}
+              </select>
+            </div>
+
+            <!-- Custom Message Area -->
+            <div id="ind-custom-area" class="form-group" style="display:none;">
+              <label>Custom Message</label>
+              <div class="wa-placeholder-chips" style="margin-bottom:8px;">
+                ${PLACEHOLDERS.map(p => `<button type="button" class="wa-chip" data-ph="${p}">{{${p}}}</button>`).join('')}
+              </div>
+              <textarea id="ind-custom-body" rows="6" placeholder="Type your WhatsApp message here..."></textarea>
+            </div>
+
+            <!-- Preview Box -->
+            <div class="form-group">
+              <label>Message Preview</label>
+              <div class="wa-preview-box">
+                <div class="wa-preview-bubble" id="ind-preview-bubble">Select template or type message...</div>
+              </div>
+            </div>
+
+            <div class="wa-bulk-actions">
+              <button class="btn btn-success btn-lg" id="btn-ind-send-now"><i data-lucide="send"></i> Send WhatsApp Message</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    const memberSelect = content.querySelector('#ind-member-select');
+    const nameInput = content.querySelector('#ind-member-name');
+    const mobileInput = content.querySelector('#ind-mobile');
+    const modeSelect = content.querySelector('#ind-msg-mode');
+    const tplArea = content.querySelector('#ind-tpl-area');
+    const customArea = content.querySelector('#ind-custom-area');
+    const tplSelect = content.querySelector('#ind-template-select');
+    const customText = content.querySelector('#ind-custom-body');
+    const previewBubble = content.querySelector('#ind-preview-bubble');
+
+    // Auto fill on member select
+    memberSelect.addEventListener('change', () => {
+      const opt = memberSelect.options[memberSelect.selectedIndex];
+      if (opt && opt.value) {
+        nameInput.value = opt.dataset.name || '';
+        mobileInput.value = opt.dataset.mobile || '';
+      }
+      updatePreview();
+    });
+
+    // Toggle message mode
+    modeSelect.addEventListener('change', () => {
+      if (modeSelect.value === 'custom') {
+        tplArea.style.display = 'none';
+        customArea.style.display = 'block';
+      } else {
+        tplArea.style.display = 'block';
+        customArea.style.display = 'none';
+      }
+      updatePreview();
+    });
+
+    // Update preview
+    const updatePreview = () => {
+      const memberName = nameInput.value.trim() || 'Member';
+      if (modeSelect.value === 'custom') {
+        let text = customText.value || 'Type message above...';
+        text = text.replace(/\{\{MemberName\}\}/g, memberName);
+        previewBubble.innerHTML = text.replace(/\n/g, '<br>');
+      } else {
+        const opt = tplSelect.options[tplSelect.selectedIndex];
+        let text = opt ? decodeURIComponent(opt.dataset.body || '') : '';
+        text = text.replace(/\{\{MemberName\}\}/g, memberName);
+        previewBubble.innerHTML = text ? text.replace(/\n/g, '<br>') : 'No template selected';
+      }
+    };
+
+    tplSelect.addEventListener('change', updatePreview);
+    customText.addEventListener('input', updatePreview);
+    nameInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    // Variable chip insertion for custom message
+    content.querySelectorAll('.wa-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const pos = customText.selectionStart;
+        const insert = `{{${chip.dataset.ph}}}`;
+        customText.value = customText.value.slice(0, pos) + insert + customText.value.slice(pos);
+        customText.focus();
+        customText.setSelectionRange(pos + insert.length, pos + insert.length);
+        updatePreview();
+      });
+    });
+
+    // Send button click handler
+    content.querySelector('#btn-ind-send-now').addEventListener('click', async () => {
+      const memberId = memberSelect.value ? parseInt(memberSelect.value) : null;
+      const memberName = nameInput.value.trim();
+      const mobile = mobileInput.value.trim();
+      const mode = modeSelect.value;
+
+      if (!mobile) {
+        return showToast('Mobile number is required', 'error');
+      }
+
+      const sendBtn = content.querySelector('#btn-ind-send-now');
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = '<i data-lucide="loader"></i> Sending...';
+      if (window.lucide) lucide.createIcons();
+
+      try {
+        let payload = {
+          memberId,
+          memberName,
+          mobile,
+          data: { MemberName: memberName || 'Member' },
+          sentBy: 'staff'
+        };
+
+        if (mode === 'custom') {
+          const customMsg = customText.value.trim();
+          if (!customMsg) {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i data-lucide="send"></i> Send WhatsApp Message';
+            if (window.lucide) lucide.createIcons();
+            return showToast('Custom message body cannot be empty', 'error');
+          }
+          payload.customMessage = customMsg;
+        } else {
+          payload.templateKey = tplSelect.value;
+        }
+
+        const result = await api.post('/api/whatsapp/send', payload);
+
+        if (result.success) {
+          showToast('Opening WhatsApp App / Web...', 'success');
+          openWhatsAppWeb({ mobile, message: result.messageBody });
+          if (mode === 'custom') customText.value = '';
+          updatePreview();
+        } else {
+          showToast(result.reason || result.error || 'Failed to process WhatsApp message', 'error');
+          if (result.messageBody) {
+            openWhatsAppWeb({ mobile, message: result.messageBody });
+          }
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = '<i data-lucide="send"></i> Send WhatsApp Message';
+        if (window.lucide) lucide.createIcons();
+      }
+    });
+
+    lucide.createIcons();
   },
 
   templateCard: (t) => `
@@ -312,6 +514,21 @@ const WhatsAppView = {
 
   renderLogs: async (content) => {
     const logs = await api.get('/api/whatsapp/logs?limit=200');
+    const logRowHtml = (log) => `<tr>
+      <td>${new Date(log.sent_at).toLocaleString()}</td>
+      <td>${log.member_name||'—'}</td><td>${log.mobile}</td>
+      <td>${log.notification_type||'—'}</td>
+      <td><code>${log.template_key||'—'}</code></td>
+      <td><span class="badge badge-${log.status==='sent'||log.status==='delivered'?'success':'danger'}">${log.status}</span></td>
+      <td>${log.sent_by||'system'}</td>
+      <td>
+        <div style="display:flex;gap:4px;">
+          ${log.status==='failed'?`<button class="btn btn-icon btn-secondary btn-resend" data-id="${log.id}" title="Resend"><i data-lucide="refresh-cw"></i></button>`:''}
+          <button class="btn btn-icon btn-secondary btn-view-log" data-msg="${encodeURIComponent(log.message_body||'')}" title="View"><i data-lucide="eye"></i></button>
+          <button class="btn btn-icon btn-danger btn-delete-log" data-id="${log.id}" title="Delete Log"><i data-lucide="trash-2"></i></button>
+        </div>
+      </td></tr>`;
+
     content.innerHTML = `
       <div class="wa-logs">
         <div class="wa-logs-toolbar">
@@ -322,24 +539,17 @@ const WhatsAppView = {
             <input type="date" id="log-to" class="date-input">
             <button class="btn btn-secondary btn-sm" id="btn-filter-logs">Filter</button>
           </div>
-          <button class="btn btn-secondary btn-sm" id="btn-export-logs"><i data-lucide="download"></i> Export CSV</button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary btn-sm" id="btn-export-logs"><i data-lucide="download"></i> Export CSV</button>
+            <button class="btn btn-danger btn-sm" id="btn-clear-all-logs"><i data-lucide="trash-2"></i> Clear Logs</button>
+          </div>
         </div>
         <div class="table-container">
           <table class="data-table">
             <thead><tr><th>Date & Time</th><th>Member</th><th>Mobile</th><th>Type</th><th>Template</th><th>Status</th><th>Sent By</th><th>Actions</th></tr></thead>
             <tbody id="logs-tbody">
               ${logs.length===0 ? '<tr><td colspan="8" class="text-center text-muted">No logs yet</td></tr>'
-                : logs.map(log => `<tr>
-                    <td>${new Date(log.sent_at).toLocaleString()}</td>
-                    <td>${log.member_name||'—'}</td><td>${log.mobile}</td>
-                    <td>${log.notification_type||'—'}</td>
-                    <td><code>${log.template_key||'—'}</code></td>
-                    <td><span class="badge badge-${log.status==='sent'||log.status==='delivered'?'success':'danger'}">${log.status}</span></td>
-                    <td>${log.sent_by||'system'}</td>
-                    <td>
-                      ${log.status==='failed'?`<button class="btn btn-icon btn-secondary btn-resend" data-id="${log.id}" title="Resend"><i data-lucide="refresh-cw"></i></button>`:''}
-                      <button class="btn btn-icon btn-secondary btn-view-log" data-msg="${encodeURIComponent(log.message_body||'')}" title="View"><i data-lucide="eye"></i></button>
-                    </td></tr>`).join('')}
+                : logs.map(logRowHtml).join('')}
             </tbody>
           </table>
         </div>
@@ -354,17 +564,7 @@ const WhatsAppView = {
         const filtered = await api.get(`/api/whatsapp/logs?${p.toString()}`);
         content.querySelector('#logs-tbody').innerHTML = filtered.length===0
           ? '<tr><td colspan="8" class="text-center text-muted">No matching logs</td></tr>'
-          : filtered.map(log => `<tr>
-              <td>${new Date(log.sent_at).toLocaleString()}</td>
-              <td>${log.member_name||'—'}</td><td>${log.mobile}</td>
-              <td>${log.notification_type||'—'}</td>
-              <td><code>${log.template_key||'—'}</code></td>
-              <td><span class="badge badge-${log.status==='sent'?'success':'danger'}">${log.status}</span></td>
-              <td>${log.sent_by||'system'}</td>
-              <td>
-                ${log.status==='failed'?`<button class="btn btn-icon btn-secondary btn-resend" data-id="${log.id}"><i data-lucide="refresh-cw"></i></button>`:''}
-                <button class="btn btn-icon btn-secondary btn-view-log" data-msg="${encodeURIComponent(log.message_body||'')}"><i data-lucide="eye"></i></button>
-              </td></tr>`).join('');
+          : filtered.map(logRowHtml).join('');
         lucide.createIcons(); WhatsAppView.bindLogActions(content);
       } catch(e) { showToast(e.message,'error'); }
     });
@@ -400,6 +600,29 @@ const WhatsAppView = {
         modal.addEventListener('click', e=>{ if(e.target===modal) modal.remove(); });
       });
     });
+    content.querySelectorAll('.btn-delete-log').forEach(btn => {
+      btn.addEventListener('click', () => {
+        showConfirm('Delete Log Entry', 'Are you sure you want to delete this log entry?', async () => {
+          try {
+            await api.delete(`/api/whatsapp/logs/${btn.dataset.id}`);
+            showToast('Log entry deleted');
+            WhatsAppView.renderTab('logs', content);
+          } catch(e) { showToast(e.message, 'error'); }
+        });
+      });
+    });
+    const clearAllBtn = content.querySelector('#btn-clear-all-logs');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', () => {
+        showConfirm('Clear All Logs', 'Are you sure you want to permanently delete ALL WhatsApp message logs?', async () => {
+          try {
+            await api.delete('/api/whatsapp/logs');
+            showToast('All WhatsApp logs cleared');
+            WhatsAppView.renderTab('logs', content);
+          } catch(e) { showToast(e.message, 'error'); }
+        });
+      });
+    }
   },
 
   reminderRow: (r, templates) => {
@@ -641,8 +864,10 @@ export function openWASendModal({ memberId, memberName, mobile, prefillTemplate=
     if(!mobile||!templateKey) return showToast('Mobile and template required','error');
     try {
       const result = await api.post('/api/whatsapp/send',{ memberId, memberName, mobile, templateKey, data:{MemberName:memberName}, sentBy:'staff' });
-      if(result.success) { showToast('WhatsApp sent!','success'); close(); }
-      else showToast(result.error||'Send failed','error');
+      const msgText = result.messageBody || '';
+      openWhatsAppWeb({ mobile, message: msgText });
+      showToast('Opening WhatsApp...','success');
+      close();
     } catch(e) { showToast(e.message,'error'); }
   });
 }

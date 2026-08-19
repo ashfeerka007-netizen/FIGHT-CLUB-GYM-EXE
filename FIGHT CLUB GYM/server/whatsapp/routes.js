@@ -1,4 +1,4 @@
-﻿// WhatsApp API Routes — Fight Club Gym
+// WhatsApp API Routes — Fight Club Gym
 // Mounted at /api/whatsapp in server/index.js
 
 const express = require('express');
@@ -127,6 +127,22 @@ router.get('/logs', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── DELETE /api/whatsapp/logs/:id ───────────────────────────────────────────
+router.delete('/logs/:id', async (req, res) => {
+  try {
+    await db.run('DELETE FROM whatsapp_logs WHERE id=?', [req.params.id]);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE /api/whatsapp/logs ───────────────────────────────────────────────
+router.delete('/logs', async (req, res) => {
+  try {
+    await db.run('DELETE FROM whatsapp_logs');
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── GET /api/whatsapp/stats ──────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
@@ -152,28 +168,57 @@ router.get('/stats', async (req, res) => {
 router.post('/send', async (req, res) => {
   try {
     const { memberId, mobile, memberName, templateKey, customMessage, data } = req.body;
-    if (!mobile) return res.status(400).json({ error: 'mobile is required' });
-
-    if (customMessage) {
-      // Direct custom message — log it manually
-      const settings = await db.get('SELECT * FROM whatsapp_settings WHERE id = 1');
-      if (!settings || !settings.enabled) return res.status(400).json({ error: 'WhatsApp notifications are disabled' });
-      const { sendMessage: svc } = require('./service');
-      // Insert fake template temporarily
-      const result = await svc({
-        memberId, memberName, mobile,
-        templateKey: templateKey || 'custom',
-        data: { ...data, _customMessage: customMessage },
-        sentBy: req.body.sentBy || 'staff',
-      });
-      return res.json(result);
-    }
+    if (!mobile) return res.status(400).json({ error: 'Mobile number is required' });
 
     const result = await sendMessage({
-      memberId, memberName, mobile, templateKey,
+      memberId,
+      memberName,
+      mobile,
+      templateKey,
+      customMessage,
       data: data || {},
       sentBy: req.body.sentBy || 'staff',
     });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── POST /api/whatsapp/send-payment-receipt/:paymentId ───────────────────────
+router.post('/send-payment-receipt/:paymentId', async (req, res) => {
+  try {
+    const payment = await db.get(
+      `SELECT p.*, m.fullname as member_name, m.mobile as member_mobile, m.id as member_id,
+              mp.name as plan_name, s.expiry_date
+       FROM payments p
+       JOIN members m ON p.member_id = m.id
+       LEFT JOIN subscriptions s ON p.subscription_id = s.id
+       LEFT JOIN membership_plans mp ON s.plan_id = mp.id
+       WHERE p.id = ?`,
+      [req.params.paymentId]
+    );
+
+    if (!payment) return res.status(404).json({ error: 'Payment record not found' });
+    if (!payment.member_mobile) return res.status(400).json({ error: 'Member does not have a mobile number recorded' });
+
+    const receiptData = {
+      MemberName: payment.member_name,
+      ReceiptNo: payment.invoice_number,
+      InvoiceNo: payment.invoice_number,
+      Amount: payment.paid_amount,
+      MembershipPlan: payment.plan_name || 'Gym Membership',
+      DueDate: payment.payment_date,
+      ExpiryDate: payment.expiry_date || payment.payment_date
+    };
+
+    const result = await sendMessage({
+      memberId: payment.member_id,
+      memberName: payment.member_name,
+      mobile: payment.member_mobile,
+      templateKey: 'payment_receipt',
+      data: receiptData,
+      sentBy: req.body.sentBy || 'staff'
+    });
+
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -1,4 +1,4 @@
-﻿// Shared UI Utilities for Fight Club Gym
+// Shared UI Utilities for Fight Club Gym
 // Extracted here to avoid circular imports between app.js and view modules
 
 // ----------------------------------------------------
@@ -77,4 +77,26 @@ export function showConfirm(title, message, onConfirm, confirmText = 'Delete', b
     closeModal();
     await onConfirm();
   });
+}
+
+// ----------------------------------------------------
+// WHATSAPP REDIRECT HELPER (wa.me / WhatsApp Web)
+// ----------------------------------------------------
+export function openWhatsAppWeb({ mobile, message, defaultCountryCode = '91' }) {
+  let digits = (mobile || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length === 12) {
+    // Already has 91 country code
+  } else if (digits.length === 10) {
+    digits = defaultCountryCode + digits;
+  }
+  const url = `https://wa.me/${digits}${message ? '?text=' + encodeURIComponent(message) : ''}`;
+  
+  // Use anchor click to ensure popup blockers don't block opening WhatsApp tab/app
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }

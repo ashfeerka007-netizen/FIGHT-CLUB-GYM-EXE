@@ -1,6 +1,6 @@
 // Payments & Invoicing View for Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm } from '../utils.js';
+import { showToast, showConfirm, openWhatsAppWeb } from '../utils.js';
 
 const PaymentsView = {
   payments: [],
@@ -58,6 +58,7 @@ const PaymentsView = {
                   <td>
                     <div class="flex gap-xs" style="display:flex; gap:4px;">
                       <button class="btn btn-secondary btn-sm btn-view-invoice" data-id="${p.id}"><i data-lucide="eye" style="width:12px;height:12px;"></i> Pass</button>
+                      <button class="btn btn-success btn-sm btn-wa-receipt" data-id="${p.id}" title="Send WhatsApp Receipt"><i data-lucide="message-square" style="width:12px;height:12px;"></i> WhatsApp</button>
                       <button class="btn btn-secondary btn-sm btn-edit-payment" data-id="${p.id}"><i data-lucide="edit-2" style="width:12px;height:12px;"></i> Edit</button>
                       <button class="btn btn-danger btn-sm btn-delete-payment" data-id="${p.id}"><i data-lucide="trash-2" style="width:12px;height:12px;"></i> Remove</button>
                     </div>
@@ -81,6 +82,7 @@ const PaymentsView = {
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary btn-close-modal">Close</button>
+            <button class="btn btn-success" id="btn-wa-modal-receipt" data-id=""><i data-lucide="message-square"></i> Send WhatsApp Receipt</button>
             <button class="btn btn-primary" id="btn-print-receipt"><i data-lucide="printer"></i> Print / Save PDF</button>
           </div>
         </div>
@@ -193,6 +195,63 @@ const PaymentsView = {
         }
       });
     });
+
+    // WhatsApp receipt direct send from table row
+    document.querySelectorAll('.btn-wa-receipt').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        const payment = PaymentsView.payments.find(p => p.id == id);
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader" style="width:12px;height:12px;"></i> Sending...';
+        if (window.lucide) lucide.createIcons();
+        try {
+          const res = await api.post(`/api/whatsapp/send-payment-receipt/${id}`);
+          const msgText = res.messageBody || '';
+          if (payment && payment.member_phone) {
+            openWhatsAppWeb({ mobile: payment.member_phone, message: msgText });
+          } else {
+            openWhatsAppWeb({ mobile: '', message: msgText });
+          }
+          showToast('Opening WhatsApp App / Web...', 'success');
+        } catch (err) {
+          showToast('WhatsApp error: ' + err.message, 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="message-square" style="width:12px;height:12px;"></i> WhatsApp';
+          if (window.lucide) lucide.createIcons();
+        }
+      });
+    });
+
+    // WhatsApp receipt send from modal button
+    const modalWaBtn = document.getElementById('btn-wa-modal-receipt');
+    if (modalWaBtn) {
+      modalWaBtn.addEventListener('click', async () => {
+        const id = modalWaBtn.getAttribute('data-id');
+        if (!id) return;
+        const payment = PaymentsView.payments.find(p => p.id == id);
+        modalWaBtn.disabled = true;
+        modalWaBtn.innerHTML = '<i data-lucide="loader"></i> Sending...';
+        if (window.lucide) lucide.createIcons();
+        try {
+          const res = await api.post(`/api/whatsapp/send-payment-receipt/${id}`);
+          const msgText = res.messageBody || '';
+          if (payment && payment.member_phone) {
+            openWhatsAppWeb({ mobile: payment.member_phone, message: msgText });
+          } else {
+            openWhatsAppWeb({ mobile: '', message: msgText });
+          }
+          showToast('Opening WhatsApp App / Web...', 'success');
+        } catch (err) {
+          showToast('WhatsApp error: ' + err.message, 'error');
+        } finally {
+          modalWaBtn.disabled = false;
+          modalWaBtn.innerHTML = '<i data-lucide="message-square"></i> Send WhatsApp Receipt';
+          if (window.lucide) lucide.createIcons();
+        }
+      });
+    }
     
     // Modal controls
     document.querySelectorAll('.btn-close-modal').forEach(btn => {
@@ -442,6 +501,11 @@ const PaymentsView = {
         </div>
       </div>
     `;
+    
+    const modalWaBtn = document.getElementById('btn-wa-modal-receipt');
+    if (modalWaBtn) {
+      modalWaBtn.setAttribute('data-id', p.id);
+    }
     
     document.getElementById('invoice-detail-modal').classList.remove('hidden');
     lucide.createIcons();

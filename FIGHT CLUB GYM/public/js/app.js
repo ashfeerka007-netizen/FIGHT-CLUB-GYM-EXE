@@ -4,18 +4,18 @@ import { showToast as _showToast } from './utils.js';
 export { showToast, showConfirm } from './utils.js';
 
 // Import Views
-import DashboardView from './views/dashboard.js?v=1.1.0';
-import MembersView from './views/members.js?v=1.1.0';
-import SubscriptionsView from './views/subscriptions.js?v=1.1.0';
-import PlansView from './views/plans.js?v=1.1.0';
-import PaymentsView from './views/payments.js?v=1.1.0';
-import AttendanceView from './views/attendance.js?v=1.1.0';
-import TrainersView from './views/trainers.js?v=1.1.0';
-import ExpensesView from './views/expenses.js?v=1.1.0';
-import ReportsView from './views/reports.js?v=1.1.0';
-import SettingsView from './views/settings.js?v=1.1.0';
-import WhatsAppView from './views/whatsapp.js?v=1.1.0';
-import UsersView from './views/users.js?v=1.1.0';
+import DashboardView from './views/dashboard.js?v=1.2.0';
+import MembersView from './views/members.js?v=1.2.0';
+import SubscriptionsView from './views/subscriptions.js?v=1.2.0';
+import PlansView from './views/plans.js?v=1.2.0';
+import PaymentsView from './views/payments.js?v=1.2.0';
+import AttendanceView from './views/attendance.js?v=1.2.0';
+import TrainersView from './views/trainers.js?v=1.2.0';
+import ExpensesView from './views/expenses.js?v=1.2.0';
+import ReportsView from './views/reports.js?v=1.2.0';
+import SettingsView from './views/settings.js?v=1.2.0';
+import WhatsAppView from './views/whatsapp.js?v=1.2.0';
+import UsersView from './views/users.js?v=1.2.0';
 
 // Map hash routes to view modules
 const routes = {
