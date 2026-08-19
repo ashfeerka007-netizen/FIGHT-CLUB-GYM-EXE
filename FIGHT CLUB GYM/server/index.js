@@ -138,7 +138,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
     const recentPayments = await db.all(
       `SELECT p.*, m.fullname as member_name 
        FROM payments p 
-       JOIN members m ON p.member_id = m.id 
+       LEFT JOIN members m ON p.member_id = m.id 
        ORDER BY p.payment_date DESC, p.id DESC LIMIT 5`
     );
     
@@ -151,8 +151,8 @@ app.get('/api/dashboard/stats', async (req, res) => {
     const recentRenewals = await db.all(
       `SELECT s.*, m.fullname as member_name, mp.name as plan_name 
        FROM subscriptions s
-       JOIN members m ON s.member_id = m.id
-       JOIN membership_plans mp ON s.plan_id = mp.id
+       LEFT JOIN members m ON s.member_id = m.id
+       LEFT JOIN membership_plans mp ON s.plan_id = mp.id
        ORDER BY s.created_at DESC LIMIT 5`
     );
     
@@ -264,10 +264,19 @@ app.get('/api/members', async (req, res) => {
   }
   
   if (sort) {
-    // Validate sort column to avoid SQL injection
-    const allowedCols = ['fullname', 'member_code', 'joining_date', 'status'];
-    if (allowedCols.includes(sort)) {
-      sql += ` ORDER BY m.${sort} ${order === 'DESC' ? 'DESC' : 'ASC'}`;
+    // Map frontend sort keys to correct SQL column expressions
+    const colMap = {
+      fullname: 'm.fullname',
+      member_code: 'm.member_code',
+      joining_date: 'm.joining_date',
+      status: 'm.status',
+      mobile: 'm.mobile',
+      expiry_date: 's.expiry_date',
+      trainer_name: 't.fullname'
+    };
+    const sortExpr = colMap[sort];
+    if (sortExpr) {
+      sql += ` ORDER BY ${sortExpr} ${order === 'DESC' ? 'DESC' : 'ASC'}`;
     }
   } else {
     sql += ` ORDER BY m.id DESC`;
@@ -327,23 +336,30 @@ app.post('/api/members', upload.single('photo'), async (req, res) => {
     trainer_id, medical_notes, notes, status = 'Active'
   } = req.body;
   
-  if (!fullname || !member_code) {
-    return res.status(400).json({ error: 'Membership Number and Full name are required' });
+  if (!fullname) {
+    return res.status(400).json({ error: 'Full name is required' });
   }
   
   try {
-    const final_member_code = member_code;
+    let final_member_code = member_code ? member_code : null;
     const photo_path = req.file ? `/uploads/members/${req.file.filename}` : '';
     
+    // If no member_code provided, insert first then update with auto ID-based code
     const sql = `INSERT INTO members (member_code, fullname, photo_path, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, trainer_id, medical_notes, status, notes)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
                  
     const result = await db.run(sql, [
-      final_member_code, fullname, photo_path, gender, dob, mobile, whatsapp, email,
+      final_member_code || null, fullname, photo_path, gender, dob, mobile, whatsapp, email,
       address, emergency_contact, blood_group, joining_date,
       trainer_id ? parseInt(trainer_id) : null,
       medical_notes, status, notes
     ]);
+
+    // Auto-assign member code if not provided
+    if (!final_member_code) {
+      final_member_code = `FC-${1000 + result.id}`;
+      await db.run(`UPDATE members SET member_code = ? WHERE id = ?`, [final_member_code, result.id]);
+    }
     
     await db.run(
       `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
@@ -526,8 +542,8 @@ app.get('/api/subscriptions', async (req, res) => {
       `SELECT s.*, m.fullname as member_name, m.member_code, mp.name as plan_name, mp.final_amount,
               (JULIANDAY(s.expiry_date) - JULIANDAY('now')) as days_remaining
        FROM subscriptions s
-       JOIN members m ON s.member_id = m.id
-       JOIN membership_plans mp ON s.plan_id = mp.id
+       LEFT JOIN members m ON s.member_id = m.id
+       LEFT JOIN membership_plans mp ON s.plan_id = mp.id
        ORDER BY s.id DESC`
     );
     res.json(subs);
@@ -537,7 +553,7 @@ app.get('/api/subscriptions', async (req, res) => {
 });
 
 app.post('/api/subscriptions', async (req, res) => {
-  const { member_id, plan_id, start_date, payment_method, remarks } = req.body;
+  const { member_id, plan_id, start_date, payment_method, remarks, discount_type, discount_value } = req.body;
   
   if (!member_id || !plan_id || !start_date) {
     return res.status(400).json({ error: 'Member, Plan and Start Date are required' });
@@ -556,7 +572,21 @@ app.post('/api/subscriptions', async (req, res) => {
     expiry.setMonth(start.getMonth() + plan.duration_months);
     const expiry_date = expiry.toISOString().split('T')[0];
     
-    // 3. Create Subscription
+    // 3. Calculate applied discount and final payable amount
+    const baseAmount = plan.final_amount;
+    const rawDiscount = parseFloat(discount_value) || 0;
+    let appliedDiscount = 0;
+    if (rawDiscount > 0) {
+      if (discount_type === 'percent') {
+        appliedDiscount = Math.min((baseAmount * rawDiscount) / 100, baseAmount);
+      } else {
+        appliedDiscount = Math.min(rawDiscount, baseAmount);
+      }
+    }
+    appliedDiscount = Math.round(appliedDiscount * 100) / 100;
+    const paid_amount = Math.max(0, Math.round((baseAmount - appliedDiscount) * 100) / 100);
+
+    // 4. Create Subscription
     const subSql = `INSERT INTO subscriptions (member_id, plan_id, start_date, expiry_date, status) VALUES (?, ?, ?, ?, 'Active')`;
     const subResult = await db.run(subSql, [member_id, plan_id, start_date, expiry_date]);
     const subscription_id = subResult.id;
@@ -564,7 +594,7 @@ app.post('/api/subscriptions', async (req, res) => {
     // Update member status to Active
     await db.run(`UPDATE members SET status = 'Active' WHERE id = ?`, [member_id]);
     
-    // 4. Record Payment
+    // 5. Record Payment
     // Generate Invoice Number (e.g. INV-YYYY-001)
     const year = new Date().getFullYear();
     const lastInvoice = await db.get(`SELECT invoice_number FROM payments ORDER BY id DESC LIMIT 1`);
@@ -585,13 +615,18 @@ app.post('/api/subscriptions', async (req, res) => {
                     
     const payResult = await db.run(paySql, [
       invoice_number, today, member_id, subscription_id,
-      plan.price, plan.discount, plan.tax, plan.final_amount, 0, // Assume paid in full for simplicity
-      payment_method || 'Cash', remarks || `Subscription for ${plan.name}`
+      plan.price,
+      appliedDiscount,  // applied discount amount
+      plan.tax,
+      paid_amount,      // final payable after discount
+      0,
+      payment_method || 'Cash',
+      remarks || `Subscription for ${plan.name}`
     ]);
     
     await db.run(
       `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
-      [1, 'admin', 'Subscription Created', `Created subscription ID: ${subscription_id} for Member ID: ${member_id}`]
+      [1, 'admin', 'Subscription Created', `Created subscription ID: ${subscription_id} for Member ID: ${member_id}${appliedDiscount > 0 ? ` (Discount: ₹${appliedDiscount})` : ''}`]
     );
 
     let whatsappSent = false;
@@ -609,7 +644,7 @@ app.post('/api/subscriptions', async (req, res) => {
             data: {
               MemberName: member.fullname,
               MembershipPlan: plan.name,
-              Amount: plan.final_amount,
+              Amount: paid_amount,
               ExpiryDate: expiry_date,
               ReceiptNo: invoice_number,
               InvoiceNo: invoice_number,
@@ -631,7 +666,8 @@ app.post('/api/subscriptions', async (req, res) => {
       payment_id: payResult.id,
       expiry_date,
       invoice_number,
-      final_amount: plan.final_amount,
+      final_amount: paid_amount,
+      applied_discount: appliedDiscount,
       whatsappSent,
       whatsappReason
     });
@@ -665,9 +701,9 @@ app.get('/api/payments', async (req, res) => {
     const payments = await db.all(
       `SELECT p.*, m.fullname as member_name, m.member_code, mp.name as plan_name 
        FROM payments p
-       JOIN members m ON p.member_id = m.id
-       JOIN subscriptions s ON p.subscription_id = s.id
-       JOIN membership_plans mp ON s.plan_id = mp.id
+       LEFT JOIN members m ON p.member_id = m.id
+       LEFT JOIN subscriptions s ON p.subscription_id = s.id
+       LEFT JOIN membership_plans mp ON s.plan_id = mp.id
        ORDER BY p.id DESC`
     );
     res.json(payments);
@@ -745,8 +781,8 @@ app.get('/api/reminders/due', async (req, res) => {
               mp.name as plan_name, mp.final_amount,
               (JULIANDAY(s.expiry_date) - JULIANDAY(?)) as days_remaining
        FROM subscriptions s
-       JOIN members m ON s.member_id = m.id
-       JOIN membership_plans mp ON s.plan_id = mp.id
+       LEFT JOIN members m ON s.member_id = m.id
+       LEFT JOIN membership_plans mp ON s.plan_id = mp.id
        WHERE s.expiry_date <= ? AND s.status = 'Active'`,
       [today, oneWeek]
     );
@@ -756,7 +792,7 @@ app.get('/api/reminders/due', async (req, res) => {
       `SELECT p.id as payment_id, p.invoice_number, p.balance, p.payment_date,
               m.id as member_id, m.fullname, m.mobile, m.whatsapp, m.email
        FROM payments p
-       JOIN members m ON p.member_id = m.id
+       LEFT JOIN members m ON p.member_id = m.id
        WHERE p.balance > 0`
     );
     

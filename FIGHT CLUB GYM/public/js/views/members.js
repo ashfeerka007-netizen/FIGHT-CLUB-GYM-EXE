@@ -37,12 +37,12 @@ const MembersView = {
           <table id="members-table">
             <thead>
               <tr>
-                <th class="sortable" data-sort="member_code">Code</th>
-                <th class="sortable" data-sort="fullname">Full Name</th>
-                <th>Mobile</th>
-                <th>Plan Status</th>
-                <th>Expiry</th>
-                <th>Assigned Trainer</th>
+                <th class="sortable" data-sort="member_code">Code <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="fullname">Full Name <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="mobile">Mobile <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="status">Plan Status <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="expiry_date">Expiry <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="trainer_name">Assigned Trainer <span class="sort-icon"></span></th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -68,8 +68,8 @@ const MembersView = {
                 <div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="reg-member-code">Membership Number *</label>
-                      <input type="number" id="reg-member-code" min="0" max="99999999990" required placeholder="e.g. 1001">
+                      <label for="reg-member-code">Membership Number <span style="font-size:0.75rem;color:var(--color-text-muted);">(auto-assigned if blank)</span></label>
+                      <input type="number" id="reg-member-code" min="0" max="99999999990" placeholder="e.g. 1001">
                     </div>
                     <div class="form-group">
                       <label for="reg-fullname">Full Name *</label>
@@ -220,8 +220,10 @@ const MembersView = {
   fetchMembers: async () => {
     try {
       const q = new URLSearchParams(MembersView.filters).toString();
-      MembersView.members = await api.get(`/api/members?${q}`);
+      const res = await api.get(`/api/members?${q}`);
+      MembersView.members = Array.isArray(res) ? res : [];
     } catch (e) {
+      MembersView.members = [];
       showToast('Error loading members: ' + e.message, 'error');
     }
   },
@@ -230,17 +232,20 @@ const MembersView = {
     try {
       const trainers = await api.get('/api/trainers');
       const select = document.getElementById('reg-trainer');
-      select.innerHTML = '<option value="">No Trainer Assigned</option>' + 
-        trainers.map(t => `<option value="${t.id}">${t.fullname} (${t.specialization})</option>`).join('');
+      if (select && Array.isArray(trainers)) {
+        select.innerHTML = '<option value="">No Trainer Assigned</option>' + 
+          trainers.map(t => `<option value="${t.id}">${t.fullname} (${t.specialization})</option>`).join('');
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load trainers for dropdown:', e);
     }
   },
   
   renderList: () => {
     const listBody = document.getElementById('members-list-body');
+    if (!listBody) return;
     
-    if (MembersView.members.length === 0) {
+    if (!Array.isArray(MembersView.members) || MembersView.members.length === 0) {
       listBody.innerHTML = `
         <tr>
           <td colspan="7" class="text-center">
@@ -252,6 +257,7 @@ const MembersView = {
         </tr>
       `;
       lucide.createIcons();
+      MembersView.updateSortIndicators();
       return;
     }
     
@@ -304,6 +310,23 @@ const MembersView = {
     });
     
     lucide.createIcons();
+    MembersView.updateSortIndicators();
+  },
+
+  updateSortIndicators: () => {
+    const { sort: activeSort, order } = MembersView.filters;
+    document.querySelectorAll('#members-table th.sortable').forEach(th => {
+      const col = th.getAttribute('data-sort');
+      const icon = th.querySelector('.sort-icon');
+      if (!icon) return;
+      if (col === activeSort) {
+        icon.textContent = order === 'ASC' ? ' ↑' : ' ↓';
+        th.style.color = 'var(--color-primary)';
+      } else {
+        icon.textContent = ' ⇅';
+        th.style.color = '';
+      }
+    });
   },
   
   bindEvents: () => {
@@ -428,21 +451,26 @@ const MembersView = {
       const editId = document.getElementById('edit-member-id').value;
       const formData = new FormData();
       
-      formData.append('member_code', document.getElementById('reg-member-code').value.toUpperCase());
-      formData.append('fullname', document.getElementById('reg-fullname').value);
-      formData.append('gender', document.getElementById('reg-gender').value);
-      formData.append('dob', document.getElementById('reg-dob').value);
-      formData.append('mobile', document.getElementById('reg-mobile').value);
-      formData.append('whatsapp', document.getElementById('reg-whatsapp').value);
-      formData.append('email', document.getElementById('reg-email').value);
-      formData.append('address', document.getElementById('reg-address').value);
-      formData.append('blood_group', document.getElementById('reg-blood').value);
-      formData.append('joining_date', document.getElementById('reg-joining').value);
-      formData.append('trainer_id', document.getElementById('reg-trainer').value);
-      formData.append('status', document.getElementById('reg-status').value);
-      formData.append('medical_notes', document.getElementById('reg-medical').value);
-      formData.append('emergency_contact', document.getElementById('reg-emergency').value);
-      formData.append('notes', document.getElementById('reg-notes').value);
+      const memberCodeInput = document.getElementById('reg-member-code');
+      const memberCode = memberCodeInput ? memberCodeInput.value.trim().toUpperCase() : '';
+      if (memberCode) {
+        formData.append('member_code', memberCode);
+      }
+      
+      formData.append('fullname', document.getElementById('reg-fullname')?.value || '');
+      formData.append('gender', document.getElementById('reg-gender')?.value || 'Male');
+      formData.append('dob', document.getElementById('reg-dob')?.value || '');
+      formData.append('mobile', document.getElementById('reg-mobile')?.value || '');
+      formData.append('whatsapp', document.getElementById('reg-whatsapp')?.value || '');
+      formData.append('email', document.getElementById('reg-email')?.value || '');
+      formData.append('address', document.getElementById('reg-address')?.value || '');
+      formData.append('blood_group', document.getElementById('reg-blood')?.value || '');
+      formData.append('joining_date', document.getElementById('reg-joining')?.value || '');
+      formData.append('trainer_id', document.getElementById('reg-trainer')?.value || '');
+      formData.append('status', document.getElementById('reg-status')?.value || 'Active');
+      formData.append('medical_notes', document.getElementById('reg-medical')?.value || '');
+      formData.append('emergency_contact', document.getElementById('reg-emergency')?.value || '');
+      formData.append('notes', document.getElementById('reg-notes')?.value || '');
       
       if (photoInput.files[0]) {
         formData.append('photo', photoInput.files[0]);
