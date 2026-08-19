@@ -1,0 +1,92 @@
+/* CSS Custom Properties & Variables for Fight Club Gym System */
+
+:root {
+  /* Fonts */
+  --font-primary: 'Plus Jakarta Sans', sans-serif;
+  --font-secondary: 'Outfit', sans-serif;
+
+  /* Brand Palette */
+  --color-primary: #d62828;       /* Fight Club Red */
+  --color-primary-rgb: 214, 40, 40;
+  --color-accent: #ffd700;        /* Gold Accent */
+  --color-accent-rgb: 255, 215, 0;
+
+  /* Utility Colors */
+  --color-success: #4caf50;
+  --color-success-rgb: 76, 175, 80;
+  --color-warning: #ff9800;
+  --color-warning-rgb: 255, 152, 0;
+  --color-error: #f44336;
+  --color-error-rgb: 244, 67, 54;
+  --color-info: #2196f3;
+  --color-info-rgb: 33, 150, 243;
+
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  --spacing-xxl: 3rem;
+
+  /* Borders & Radius */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Transition Durations */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark Mode Tokens (Default) */
+[data-theme="dark"] {
+  --color-bg: #0b0b0f;
+  --color-bg-sidebar: #07070a;
+  --color-bg-card: #14141c;
+  --color-bg-card-hover: #1b1b26;
+  --color-bg-glass: rgba(20, 20, 28, 0.7);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.15);
+  
+  --color-text-main: #f3f4f6;
+  --color-text-muted: #9ca3af;
+  --color-text-inverse: #111827;
+
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  --shadow-glow: 0 0 15px rgba(214, 40, 40, 0.25);
+  
+  --backdrop-blur: blur(12px);
+  --scrollbar-track: #0e0e14;
+  --scrollbar-thumb: #282836;
+}
+
+/* Light Mode Tokens */
+[data-theme="light"] {
+  --color-bg: #f8f9fa;
+  --color-bg-sidebar: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-card-hover: #f1f3f5;
+  --color-bg-glass: rgba(255, 255, 255, 0.75);
+  --color-border: rgba(0, 0, 0, 0.08);
+  --color-border-hover: rgba(0, 0, 0, 0.15);
+  
+  --color-text-main: #1f2937;
+  --color-text-muted: #6b7280;
+  --color-text-inverse: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 20px -5px rgba(0, 0, 0, 0.08);
+  --shadow-glow: 0 0 15px rgba(214, 40, 40, 0.12);
+  
+  --backdrop-blur: blur(12px);
+  --scrollbar-track: #f1f3f5;
+  --scrollbar-thumb: #ced4da;
+}
