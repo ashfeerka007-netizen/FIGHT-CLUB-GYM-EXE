@@ -1,6 +1,6 @@
 // Payments & Invoicing View for Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm, openWhatsAppWeb } from '../utils.js';
+import { showToast, showConfirm, openWhatsAppWeb, parseCSV, downloadCSV } from '../utils.js';
 
 const PaymentsView = {
   payments: [],
@@ -14,12 +14,41 @@ const PaymentsView = {
       <div class="payments-view-container">
         
         <!-- Table Header and Action Area -->
-        <div class="table-header-actions">
-          <div class="table-filters">
-            <input type="text" id="search-payments" placeholder="Search invoice, member code, name...">
+        <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:15px;">
+          <div class="table-header-actions" style="margin-bottom:0;">
+            <div class="table-filters" style="flex:1; display:flex; gap:8px; flex-wrap:wrap;">
+              <input type="text" id="search-payments" placeholder="🔍 Search invoice, member, code, method..." value="${PaymentsView.filters?.search || ''}" style="flex:1; min-width:200px;">
+              <select id="filter-payment-method" style="width:140px; padding:7px 10px; border-radius:var(--radius-sm); border:1px solid var(--color-border); background:var(--color-bg-card); font-size:0.85rem;">
+                <option value="">All Methods</option>
+                <option value="Cash">Cash</option>
+                <option value="UPI">UPI</option>
+                <option value="Card">Card</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+              </select>
+            </div>
+            <div class="flex gap-sm">
+              <button class="btn btn-secondary" id="btn-export-payments-csv"><i data-lucide="download"></i> Export CSV</button>
+              <button class="btn btn-secondary" id="btn-import-payments-csv"><i data-lucide="upload"></i> Import CSV</button>
+            </div>
           </div>
-          <div class="flex gap-sm">
-            <span class="text-sm text-muted">Showing all historical transactions</span>
+
+          <!-- Date Filter Bar for Payments -->
+          <div class="date-filter-bar" style="justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="font-size:0.8rem; color:var(--color-text-muted); font-weight:600;"><i data-lucide="calendar" style="width:14px;height:14px;display:inline-block;vertical-align:middle;"></i> Payment Date Range:</span>
+              <input type="date" id="payments-date-from" class="date-input-field" title="From Date" value="${PaymentsView.filters?.dateFrom || ''}">
+              <span style="font-size:0.8rem; color:var(--color-text-muted);">to</span>
+              <input type="date" id="payments-date-to" class="date-input-field" title="To Date" value="${PaymentsView.filters?.dateTo || ''}">
+              
+              <button type="button" class="date-preset-pill" id="pay-preset-all">All Time</button>
+              <button type="button" class="date-preset-pill" id="pay-preset-today">Today</button>
+              <button type="button" class="date-preset-pill" id="pay-preset-week">This Week</button>
+              <button type="button" class="date-preset-pill" id="pay-preset-month">This Month</button>
+              <button type="button" class="date-preset-pill" id="pay-preset-clear" title="Clear Date Filter"><i data-lucide="x" style="width:11px;height:11px;"></i> Clear</button>
+            </div>
+            <div id="payments-summary-metric" style="font-size:0.85rem; font-weight:700; color:var(--color-success); padding-right:6px;">
+              <!-- Rendered dynamically -->
+            </div>
           </div>
         </div>
 
@@ -40,31 +69,7 @@ const PaymentsView = {
               </tr>
             </thead>
             <tbody id="payments-list-body">
-              ${PaymentsView.payments.length === 0 ? `
-                <tr><td colspan="9" class="text-center">No payment history recorded.</td></tr>
-              ` : PaymentsView.payments.map(p => `
-                <tr>
-                  <td><strong>${p.invoice_number}</strong></td>
-                  <td>
-                    <strong>${p.member_name}</strong>
-                    <div style="font-size:0.75rem; color:var(--color-text-muted);">${p.member_code}</div>
-                  </td>
-                  <td>${p.payment_date}</td>
-                  <td>${currencySymbol}${p.amount}</td>
-                  <td>${p.discount}%</td>
-                  <td>${p.tax}%</td>
-                  <td style="color:var(--color-success); font-weight:600;">${currencySymbol}${p.paid_amount}</td>
-                  <td><span class="badge" style="background:var(--color-border);">${p.payment_method}</span></td>
-                  <td>
-                    <div class="flex gap-xs" style="display:flex; gap:4px;">
-                      <button class="btn btn-secondary btn-sm btn-view-invoice" data-id="${p.id}"><i data-lucide="eye" style="width:12px;height:12px;"></i> Pass</button>
-                      <button class="btn btn-success btn-sm btn-wa-receipt" data-id="${p.id}" title="Send WhatsApp Receipt"><i data-lucide="message-square" style="width:12px;height:12px;"></i> WhatsApp</button>
-                      <button class="btn btn-secondary btn-sm btn-edit-payment" data-id="${p.id}"><i data-lucide="edit-2" style="width:12px;height:12px;"></i> Edit</button>
-                      <button class="btn btn-danger btn-sm btn-delete-payment" data-id="${p.id}"><i data-lucide="trash-2" style="width:12px;height:12px;"></i> Remove</button>
-                    </div>
-                  </td>
-                </tr>
-              `).join('')}
+              <!-- Rendered dynamically -->
             </tbody>
           </table>
         </div>
@@ -153,12 +158,67 @@ const PaymentsView = {
           </form>
         </div>
       </div>
+
+      <!-- Payments CSV Import Modal -->
+      <div id="payments-import-modal" class="modal-overlay hidden">
+        <div class="modal-card" style="max-width: 680px;">
+          <div class="modal-header">
+            <h2><i data-lucide="upload" style="margin-right:8px;"></i> Import Payments from CSV</h2>
+            <button class="btn-close-payments-import-modal"><i data-lucide="x"></i></button>
+          </div>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap: var(--spacing-md); max-height: 520px; overflow-y: auto;">
+            <div style="background: rgba(220,38,38,0.06); border: 2px dashed var(--color-border); border-radius: var(--radius-sm); padding: var(--spacing-lg); text-align: center;">
+              <i data-lucide="file-spreadsheet" style="width: 40px; height: 40px; color: var(--color-primary); margin-bottom: 8px;"></i>
+              <p style="margin-bottom: 12px; font-size: 0.95rem;">Select or drop a <strong>.CSV</strong> file containing payment transactions.</p>
+              <input type="file" id="payments-csv-file" accept=".csv,text/csv" style="display:none;">
+              <div class="flex justify-center gap-sm" style="flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary" id="btn-browse-payments-csv"><i data-lucide="folder-open"></i> Choose CSV File</button>
+                <button type="button" class="btn btn-secondary" id="btn-download-payments-template"><i data-lucide="download"></i> Download CSV Template</button>
+              </div>
+              <div id="payments-csv-filename" style="margin-top: 10px; font-weight: 600; color: var(--color-primary); display: none;"></div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 4px 2px;">
+              <span style="font-size:0.85rem; color:var(--color-text-muted);">Matches member by Member Code, Phone Number, or Full Name.</span>
+              <span id="payments-import-row-count" style="font-size:0.85rem; color:var(--color-text-muted);"></span>
+            </div>
+
+            <!-- CSV Preview Section -->
+            <div id="payments-import-preview-section" style="display:none;">
+              <h4 style="font-size: 0.9rem; font-weight:700; margin-bottom: 6px;">Data Preview (First 5 Rows):</h4>
+              <div class="table-container" style="max-height: 180px; overflow-y: auto;">
+                <table style="font-size: 0.8rem;">
+                  <thead>
+                    <tr id="payments-preview-header"></tr>
+                  </thead>
+                  <tbody id="payments-preview-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Import Status / Results -->
+            <div id="payments-import-status" style="display:none; padding: 10px; border-radius: var(--radius-sm); font-size: 0.9rem;"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-close-payments-import-modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-submit-payments-import" disabled><i data-lucide="check"></i> Start Import</button>
+          </div>
+        </div>
+      </div>
     `;
 
+    PaymentsView.renderPaymentsTable();
     PaymentsView.bindEvents();
     lucide.createIcons();
   },
   
+  filters: {
+    search: '',
+    method: '',
+    dateFrom: '',
+    dateTo: ''
+  },
+
   fetchPayments: async () => {
     try {
       PaymentsView.payments = await api.get('/api/payments');
@@ -166,23 +226,392 @@ const PaymentsView = {
       showToast('Error loading payments: ' + e.message, 'error');
     }
   },
+
+  renderPaymentsTable: () => {
+    const tbody = document.getElementById('payments-list-body');
+    const summaryMetric = document.getElementById('payments-summary-metric');
+    if (!tbody) return;
+
+    const currencySymbol = '₹';
+    const sQuery = (PaymentsView.filters.search || '').toLowerCase().trim();
+    const methodFilter = PaymentsView.filters.method;
+    const dateFrom = PaymentsView.filters.dateFrom;
+    const dateTo = PaymentsView.filters.dateTo;
+
+    const filtered = PaymentsView.payments.filter(p => {
+      // 1. Text Search
+      if (sQuery) {
+        const inv = (p.invoice_number || '').toLowerCase();
+        const memName = (p.member_name || '').toLowerCase();
+        const memCode = (p.member_code || '').toLowerCase();
+        const method = (p.payment_method || '').toLowerCase();
+        const remarks = (p.remarks || '').toLowerCase();
+        if (!inv.includes(sQuery) && !memName.includes(sQuery) && !memCode.includes(sQuery) && !method.includes(sQuery) && !remarks.includes(sQuery)) {
+          return false;
+        }
+      }
+
+      // 2. Payment Method
+      if (methodFilter && p.payment_method !== methodFilter) {
+        return false;
+      }
+
+      // 3. Date Range
+      if (dateFrom && p.payment_date && p.payment_date < dateFrom) {
+        return false;
+      }
+      if (dateTo && p.payment_date && p.payment_date > dateTo) {
+        return false;
+      }
+
+      return true;
+    });
+
+    // Calculate total collection for filtered
+    const totalCollected = filtered.reduce((acc, p) => acc + (parseFloat(p.paid_amount) || 0), 0);
+
+    if (summaryMetric) {
+      summaryMetric.innerHTML = `<span>Filtered Total: <strong>${currencySymbol}${totalCollected.toLocaleString()}</strong> (${filtered.length} Invoices)</span>`;
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="9" class="text-center py-lg text-muted">No payment records found matching the selected filters.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(p => `
+      <tr>
+        <td><strong>${p.invoice_number}</strong></td>
+        <td>
+          <strong>${p.member_name}</strong>
+          <div style="font-size:0.75rem; color:var(--color-text-muted);">${p.member_code}</div>
+        </td>
+        <td>${p.payment_date}</td>
+        <td>${currencySymbol}${p.amount}</td>
+        <td>${p.discount}%</td>
+        <td>${p.tax}%</td>
+        <td style="color:var(--color-success); font-weight:600;">${currencySymbol}${p.paid_amount}</td>
+        <td><span class="badge" style="background:var(--color-border);">${p.payment_method}</span></td>
+        <td>
+          <div class="flex gap-xs" style="display:flex; gap:4px;">
+            <button class="btn btn-secondary btn-sm btn-view-invoice" data-id="${p.id}"><i data-lucide="eye" style="width:12px;height:12px;"></i> Pass</button>
+            <button class="btn btn-success btn-sm btn-wa-receipt" data-id="${p.id}" title="Send WhatsApp Receipt"><i data-lucide="message-square" style="width:12px;height:12px;"></i> WhatsApp</button>
+            <button class="btn btn-secondary btn-sm btn-edit-payment" data-id="${p.id}"><i data-lucide="edit-2" style="width:12px;height:12px;"></i> Edit</button>
+            <button class="btn btn-danger btn-sm btn-delete-payment" data-id="${p.id}"><i data-lucide="trash-2" style="width:12px;height:12px;"></i> Remove</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    PaymentsView.bindActionButtons();
+    lucide.createIcons();
+  },
   
   bindEvents: () => {
-    // Search filter
+    // Search input
     const searchInput = document.getElementById('search-payments');
-    searchInput.addEventListener('input', (e) => {
-      const query = e.target.value.toLowerCase().trim();
-      const rows = document.querySelectorAll('#payments-list-body tr');
-      
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        if (text.includes(query)) {
-          row.classList.remove('hidden');
-        } else {
-          row.classList.add('hidden');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        PaymentsView.filters.search = e.target.value;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    // Method filter
+    const methodSelect = document.getElementById('filter-payment-method');
+    if (methodSelect) {
+      methodSelect.addEventListener('change', (e) => {
+        PaymentsView.filters.method = e.target.value;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    // Date inputs
+    const dateFromInput = document.getElementById('payments-date-from');
+    const dateToInput = document.getElementById('payments-date-to');
+    if (dateFromInput) {
+      dateFromInput.addEventListener('change', (e) => {
+        PaymentsView.filters.dateFrom = e.target.value;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+    if (dateToInput) {
+      dateToInput.addEventListener('change', (e) => {
+        PaymentsView.filters.dateTo = e.target.value;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    // Date presets
+    const payPresetAll = document.getElementById('pay-preset-all');
+    const payPresetToday = document.getElementById('pay-preset-today');
+    const payPresetWeek = document.getElementById('pay-preset-week');
+    const payPresetMonth = document.getElementById('pay-preset-month');
+    const payPresetClear = document.getElementById('pay-preset-clear');
+
+    if (payPresetAll) {
+      payPresetAll.addEventListener('click', () => {
+        PaymentsView.filters.dateFrom = '';
+        PaymentsView.filters.dateTo = '';
+        PaymentsView.filters.method = '';
+        if (dateFromInput) dateFromInput.value = '';
+        if (dateToInput) dateToInput.value = '';
+        if (methodSelect) methodSelect.value = '';
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    if (payPresetToday) {
+      payPresetToday.addEventListener('click', () => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        PaymentsView.filters.dateFrom = todayStr;
+        PaymentsView.filters.dateTo = todayStr;
+        if (dateFromInput) dateFromInput.value = todayStr;
+        if (dateToInput) dateToInput.value = todayStr;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    if (payPresetWeek) {
+      payPresetWeek.addEventListener('click', () => {
+        const today = new Date();
+        const weekAgo = new Date();
+        weekAgo.setDate(today.getDate() - 7);
+        const fromStr = weekAgo.toISOString().split('T')[0];
+        const toStr = today.toISOString().split('T')[0];
+        PaymentsView.filters.dateFrom = fromStr;
+        PaymentsView.filters.dateTo = toStr;
+        if (dateFromInput) dateFromInput.value = fromStr;
+        if (dateToInput) dateToInput.value = toStr;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    if (payPresetMonth) {
+      payPresetMonth.addEventListener('click', () => {
+        const today = new Date();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        const fromStr = firstDay.toISOString().split('T')[0];
+        const toStr = today.toISOString().split('T')[0];
+        PaymentsView.filters.dateFrom = fromStr;
+        PaymentsView.filters.dateTo = toStr;
+        if (dateFromInput) dateFromInput.value = fromStr;
+        if (dateToInput) dateToInput.value = toStr;
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    if (payPresetClear) {
+      payPresetClear.addEventListener('click', () => {
+        PaymentsView.filters.dateFrom = '';
+        PaymentsView.filters.dateTo = '';
+        if (dateFromInput) dateFromInput.value = '';
+        if (dateToInput) dateToInput.value = '';
+        PaymentsView.renderPaymentsTable();
+      });
+    }
+
+    // ----------------------------------------------------
+    // CSV EXPORT (Payments & Payment Status)
+    // ----------------------------------------------------
+    const exportPaymentsBtn = document.getElementById('btn-export-payments-csv');
+    if (exportPaymentsBtn) {
+      exportPaymentsBtn.addEventListener('click', () => {
+        if (PaymentsView.payments.length === 0) {
+          showToast('No payment transactions to export.', 'warning');
+          return;
         }
+
+        const headers = [
+          'Invoice Number', 'Transaction Date', 'Member Code', 'Member Name',
+          'Plan Name', 'Base Amount', 'Discount (%)', 'GST / Tax (%)',
+          'Final Paid (INR)', 'Pending Balance (INR)', 'Payment Method', 'Remarks'
+        ];
+
+        const rows = PaymentsView.payments.map(p => [
+          p.invoice_number || '',
+          p.payment_date || '',
+          p.member_code || '',
+          p.member_name || '',
+          p.plan_name || 'General',
+          p.amount || 0,
+          p.discount || 0,
+          p.tax || 0,
+          p.paid_amount || 0,
+          p.balance || 0,
+          p.payment_method || 'Cash',
+          p.remarks || ''
+        ]);
+
+        const filename = `fightclub_payments_${new Date().toISOString().split('T')[0]}.csv`;
+        downloadCSV(filename, headers, rows);
+        showToast(`Exported ${rows.length} payment records to ${filename}`, 'success');
+      });
+    }
+
+    // ----------------------------------------------------
+    // CSV IMPORT (Payments & Payment Status)
+    // ----------------------------------------------------
+    const importModal = document.getElementById('payments-import-modal');
+    const importBtn = document.getElementById('btn-import-payments-csv');
+    const closeImportBtns = document.querySelectorAll('.btn-close-payments-import-modal');
+    const browseFileBtn = document.getElementById('btn-browse-payments-csv');
+    const csvFileInput = document.getElementById('payments-csv-file');
+    const csvFilenameEl = document.getElementById('payments-csv-filename');
+    const previewSection = document.getElementById('payments-import-preview-section');
+    const previewHeader = document.getElementById('payments-preview-header');
+    const previewBody = document.getElementById('payments-preview-body');
+    const rowCountEl = document.getElementById('payments-import-row-count');
+    const submitImportBtn = document.getElementById('btn-submit-payments-import');
+    const templateBtn = document.getElementById('btn-download-payments-template');
+    const importStatusEl = document.getElementById('payments-import-status');
+
+    let parsedPaymentRows = [];
+
+    if (importBtn) {
+      importBtn.addEventListener('click', () => {
+        parsedPaymentRows = [];
+        csvFileInput.value = '';
+        csvFilenameEl.style.display = 'none';
+        previewSection.style.display = 'none';
+        importStatusEl.style.display = 'none';
+        rowCountEl.textContent = '';
+        submitImportBtn.disabled = true;
+        importModal.classList.remove('hidden');
+        lucide.createIcons();
+      });
+    }
+
+    closeImportBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        importModal.classList.add('hidden');
       });
     });
+
+    if (browseFileBtn) {
+      browseFileBtn.addEventListener('click', () => {
+        csvFileInput.click();
+      });
+    }
+
+    // Download Sample Template for Payments
+    if (templateBtn) {
+      templateBtn.addEventListener('click', () => {
+        const sampleHeaders = [
+          'Member Code', 'Member Name', 'Mobile', 'Payment Date',
+          'Invoice Number', 'Plan Name', 'Base Amount', 'Discount',
+          'Tax', 'Paid Amount', 'Balance', 'Payment Method', 'Remarks'
+        ];
+        const sampleRows = [
+          [
+            'FC-1001', 'Tyler Durden', '9876543210', '2026-03-01',
+            'INV-2026-101', 'Pro Boxing Champion', '2500', '0',
+            '0', '2500', '0', 'UPI', 'Monthly renewal fee'
+          ],
+          [
+            'FC-1002', 'Robert Paulson', '9876543211', '2026-03-01',
+            'INV-2026-102', 'Monthly Fighter', '1500', '10',
+            '0', '1350', '0', 'Cash', 'Cash desk payment'
+          ]
+        ];
+        downloadCSV('fightclub_payments_template.csv', sampleHeaders, sampleRows);
+        showToast('Downloaded sample payments CSV template.', 'info');
+      });
+    }
+
+    // File Selection & Parsing
+    if (csvFileInput) {
+      csvFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        csvFilenameEl.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+        csvFilenameEl.style.display = 'block';
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const csvText = event.target.result;
+            const { headers, rows } = parseCSV(csvText);
+
+            if (rows.length === 0) {
+              showToast('The selected CSV file appears to be empty.', 'warning');
+              submitImportBtn.disabled = true;
+              return;
+            }
+
+            parsedPaymentRows = rows;
+            rowCountEl.textContent = `Total transactions detected: ${rows.length}`;
+
+            // Preview (up to 5 rows)
+            const displayHeaders = headers.slice(0, 6);
+            previewHeader.innerHTML = displayHeaders.map(h => `<th>${h}</th>`).join('');
+            previewBody.innerHTML = rows.slice(0, 5).map(r => {
+              return `<tr>${displayHeaders.map(h => `<td>${r[h] || '-'}</td>`).join('')}</tr>`;
+            }).join('');
+
+            previewSection.style.display = 'block';
+            submitImportBtn.disabled = false;
+            importStatusEl.style.display = 'none';
+          } catch (err) {
+            showToast('Failed to parse CSV file: ' + err.message, 'error');
+            submitImportBtn.disabled = true;
+          }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    // Submit Payments Import
+    if (submitImportBtn) {
+      submitImportBtn.addEventListener('click', async () => {
+        if (parsedPaymentRows.length === 0) return;
+
+        submitImportBtn.disabled = true;
+        submitImportBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Importing...';
+        lucide.createIcons();
+
+        try {
+          const response = await api.post('/api/payments/import-csv', {
+            payments: parsedPaymentRows
+          });
+
+          importStatusEl.style.display = 'block';
+          importStatusEl.style.background = 'rgba(34, 197, 94, 0.15)';
+          importStatusEl.style.border = '1px solid var(--color-success)';
+          importStatusEl.style.color = 'var(--color-success)';
+
+          let resultMsg = `✓ Successfully imported ${response.imported} of ${response.total} payments!`;
+          if (response.errors && response.errors.length > 0) {
+            resultMsg += ` (${response.errors.length} could not be matched with existing members)`;
+          }
+          importStatusEl.textContent = resultMsg;
+
+          showToast(`Payments imported! Added ${response.imported} transactions.`, 'success');
+
+          // Reload table
+          const container = document.getElementById('view-container');
+          await PaymentsView.render(container);
+
+          setTimeout(() => {
+            importModal.classList.add('hidden');
+            submitImportBtn.innerHTML = '<i data-lucide="check"></i> Start Import';
+            submitImportBtn.disabled = false;
+          }, 1500);
+
+        } catch (err) {
+          importStatusEl.style.display = 'block';
+          importStatusEl.style.background = 'rgba(239, 68, 68, 0.15)';
+          importStatusEl.style.border = '1px solid var(--color-danger)';
+          importStatusEl.style.color = 'var(--color-danger)';
+          importStatusEl.textContent = 'Import failed: ' + err.message;
+          showToast(err.message, 'error');
+          submitImportBtn.disabled = false;
+          submitImportBtn.innerHTML = '<i data-lucide="check"></i> Retry Import';
+        }
+        lucide.createIcons();
+      });
+    }
     
     // View receipt details button click
     document.querySelectorAll('.btn-view-invoice').forEach(btn => {

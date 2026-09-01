@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS members (
     joining_date TEXT,
     trainer_id INTEGER,
     medical_notes TEXT,
+    admission_fee_paid INTEGER DEFAULT 0, -- 1 if admission fee of Rs 1500 already paid
     status TEXT DEFAULT 'Active', -- Active, Expired, Frozen
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

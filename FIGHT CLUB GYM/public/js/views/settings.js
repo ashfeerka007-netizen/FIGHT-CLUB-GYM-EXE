@@ -122,17 +122,31 @@ const SettingsView = {
             </div>
           </div>
 
-          <!-- Danger Zone: Reset Financials -->
+          <!-- Danger Zone: Reset Operations -->
           <div class="card glass-card" style="width:100%; border-left: 4px solid var(--color-error); background: rgba(244, 67, 54, 0.02);">
             <h3 class="mb-md" style="font-size: 1.15rem; font-weight: 700; color: var(--color-error); display: flex; align-items: center; gap: 8px;">
-              <i data-lucide="alert-triangle"></i> Danger Zone
+              <i data-lucide="alert-triangle"></i> Data Management & Fresh Start
             </h3>
-            <p class="text-sm text-muted mb-md">
-              Permanently delete all gym revenue (payments) and expense records to give the system a fresh start. This action is irreversible. We recommend taking a backup first.
-            </p>
-            <button class="btn btn-danger btn-block" id="btn-reset-financials" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
-              <i data-lucide="trash-2" style="width:16px; height:16px;"></i> Reset Revenue & Expenses
-            </button>
+            
+            <div style="margin-bottom: var(--spacing-lg);">
+              <h4 style="font-size: 0.95rem; font-weight:600; color:var(--color-primary); margin-bottom: 4px;">1. Reset Entire Database (Clean Slate)</h4>
+              <p class="text-sm text-muted mb-sm">
+                Clears all member records, subscriptions, payments, expenses, attendance logs, and activity records so you can start fresh with your real gym data. Admin accounts, roles, and settings are preserved.
+              </p>
+              <button class="btn btn-danger btn-block" id="btn-reset-full-database" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
+                <i data-lucide="trash" style="width:16px; height:16px;"></i> Reset Entire Database
+              </button>
+            </div>
+
+            <div style="border-top: 1px solid var(--color-border); padding-top: var(--spacing-md);">
+              <h4 style="font-size: 0.95rem; font-weight:600; color:var(--color-text-muted); margin-bottom: 4px;">2. Reset Financials Only</h4>
+              <p class="text-sm text-muted mb-sm">
+                Permanently deletes payment transactions and expense records only, keeping all member profiles intact.
+              </p>
+              <button class="btn btn-secondary btn-block" id="btn-reset-financials" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center; border-color: var(--color-error); color: var(--color-error);">
+                <i data-lucide="receipt" style="width:16px; height:16px;"></i> Reset Revenue & Expenses Only
+              </button>
+            </div>
           </div>
 
         </div>
@@ -242,6 +256,30 @@ const SettingsView = {
         );
       });
     });
+
+    // Full Database Reset Click
+    const resetFullDbBtn = document.getElementById('btn-reset-full-database');
+    if (resetFullDbBtn) {
+      resetFullDbBtn.addEventListener('click', () => {
+        showConfirm(
+          '⚠️ Reset Entire Database',
+          'CRITICAL ACTION: This will permanently delete ALL member profiles, subscriptions, invoices, payment records, expenses, and logs. Your admin login (admin/admin123) and club settings will be preserved. Proceed to wipe database for a clean start?',
+          async () => {
+            try {
+              const response = await api.post('/api/settings/reset-database', {});
+              showToast(response.message, 'success');
+              setTimeout(() => {
+                window.location.reload();
+              }, 1500);
+            } catch (err) {
+              showToast(err.message, 'error');
+            }
+          },
+          'Wipe Database',
+          'btn-danger'
+        );
+      });
+    }
 
     // Reset financials click
     const resetBtn = document.getElementById('btn-reset-financials');

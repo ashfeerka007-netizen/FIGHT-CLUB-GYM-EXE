@@ -228,7 +228,7 @@ app.get('/api/dashboard/stats', async (req, res) => {
 // 3. MEMBER ENDPOINTS
 // ----------------------------------------------------
 app.get('/api/members', async (req, res) => {
-  const { search, status, plan, trainer, sort, order = 'ASC' } = req.query;
+  const { search, status, plan, trainer, sort, order = 'ASC', date_from, date_to, date_type = 'joining' } = req.query;
   let sql = `SELECT m.*, t.fullname as trainer_name, 
              s.expiry_date, mp.name as plan_name 
              FROM members m
@@ -261,6 +261,24 @@ app.get('/api/members', async (req, res) => {
   if (trainer) {
     sql += ` AND m.trainer_id = ?`;
     params.push(trainer);
+  }
+
+  if (date_from) {
+    if (date_type === 'expiry') {
+      sql += ` AND s.expiry_date >= ?`;
+    } else {
+      sql += ` AND m.joining_date >= ?`;
+    }
+    params.push(date_from);
+  }
+
+  if (date_to) {
+    if (date_type === 'expiry') {
+      sql += ` AND s.expiry_date <= ?`;
+    } else {
+      sql += ` AND m.joining_date <= ?`;
+    }
+    params.push(date_to);
   }
   
   if (sort) {
@@ -333,7 +351,8 @@ app.post('/api/members', upload.single('photo'), async (req, res) => {
   const {
     member_code, fullname, gender, dob, mobile, whatsapp, email,
     address, emergency_contact, blood_group, joining_date,
-    trainer_id, medical_notes, notes, status = 'Active'
+    trainer_id, medical_notes, notes, status = 'Active',
+    admission_fee_paid
   } = req.body;
   
   if (!fullname) {
@@ -343,16 +362,17 @@ app.post('/api/members', upload.single('photo'), async (req, res) => {
   try {
     let final_member_code = member_code ? member_code : null;
     const photo_path = req.file ? `/uploads/members/${req.file.filename}` : '';
+    const isAdmissionPaid = (admission_fee_paid === 'true' || admission_fee_paid === true || admission_fee_paid === 1 || admission_fee_paid === '1') ? 1 : 0;
     
     // If no member_code provided, insert first then update with auto ID-based code
-    const sql = `INSERT INTO members (member_code, fullname, photo_path, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, trainer_id, medical_notes, status, notes)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const sql = `INSERT INTO members (member_code, fullname, photo_path, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, trainer_id, medical_notes, status, notes, admission_fee_paid)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
                  
     const result = await db.run(sql, [
       final_member_code || null, fullname, photo_path, gender, dob, mobile, whatsapp, email,
       address, emergency_contact, blood_group, joining_date,
       trainer_id ? parseInt(trainer_id) : null,
-      medical_notes, status, notes
+      medical_notes, status, notes, isAdmissionPaid
     ]);
 
     // Auto-assign member code if not provided
@@ -366,7 +386,7 @@ app.post('/api/members', upload.single('photo'), async (req, res) => {
       [1, 'admin', 'Member Registered', `Registered member ${fullname} with code ${final_member_code}`]
     );
     
-    res.status(201).json({ id: result.id, member_code: final_member_code });
+    res.status(201).json({ id: result.id, member_code: final_member_code, admission_fee_paid: isAdmissionPaid });
   } catch (error) {
     if (error.message.includes('UNIQUE constraint failed')) {
       return res.status(400).json({ error: 'Membership Number already exists' });
@@ -379,7 +399,8 @@ app.put('/api/members/:id', upload.single('photo'), async (req, res) => {
   const {
     member_code, fullname, gender, dob, mobile, whatsapp, email,
     address, emergency_contact, blood_group, joining_date,
-    trainer_id, medical_notes, notes, status
+    trainer_id, medical_notes, notes, status,
+    admission_fee_paid
   } = req.body;
   
   try {
@@ -388,14 +409,16 @@ app.put('/api/members/:id', upload.single('photo'), async (req, res) => {
       photo_path = `/uploads/members/${req.file.filename}`;
     }
     
-    const sql = `UPDATE members SET member_code = ?, fullname = ?, photo_path = ?, gender = ?, dob = ?, mobile = ?, whatsapp = ?, email = ?, address = ?, emergency_contact = ?, blood_group = ?, joining_date = ?, trainer_id = ?, medical_notes = ?, status = ?, notes = ?
+    const isAdmissionPaid = (admission_fee_paid === 'true' || admission_fee_paid === true || admission_fee_paid === 1 || admission_fee_paid === '1') ? 1 : 0;
+    
+    const sql = `UPDATE members SET member_code = ?, fullname = ?, photo_path = ?, gender = ?, dob = ?, mobile = ?, whatsapp = ?, email = ?, address = ?, emergency_contact = ?, blood_group = ?, joining_date = ?, trainer_id = ?, medical_notes = ?, status = ?, notes = ?, admission_fee_paid = ?
                  WHERE id = ?`;
                  
     await db.run(sql, [
       member_code, fullname, photo_path, gender, dob, mobile, whatsapp, email,
       address, emergency_contact, blood_group, joining_date,
       trainer_id ? parseInt(trainer_id) : null,
-      medical_notes, status, notes, req.params.id
+      medical_notes, status, notes, isAdmissionPaid, req.params.id
     ]);
     
     await db.run(
@@ -464,6 +487,318 @@ app.post('/api/members/:id/undo', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Date parsing helper for various formats (YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY, etc.)
+function parseFlexibleDate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmed = dateStr.trim();
+  if (!trimmed) return null;
+
+  // Format: YYYY-MM-DD
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+  }
+
+  // Format: DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Format: MM/DD/YYYY (if month <= 12 and day > 12)
+  const mdyMatch = trimmed.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (mdyMatch && parseInt(mdyMatch[1], 10) <= 12 && parseInt(mdyMatch[2], 10) > 12) {
+    const month = mdyMatch[1].padStart(2, '0');
+    const day = mdyMatch[2].padStart(2, '0');
+    const year = mdyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Format: YYYY/MM/DD or YYYY.MM.DD
+  const ymdMatch = trimmed.match(/^(\d{4})[\/\.](\d{1,2})[\/\.](\d{1,2})$/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
+  }
+
+  // Fallback to standard Date object
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
+// Field extractor with case-insensitive and alias matching
+function getField(row, keys) {
+  for (const k of keys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+      return String(row[k]).trim();
+    }
+  }
+  // Try case-insensitive and stripped comparison
+  const normalizedRow = {};
+  for (const [rk, rv] of Object.entries(row)) {
+    const cleanKey = rk.toLowerCase().replace(/[^a-z0-9]/g, '');
+    normalizedRow[cleanKey] = rv;
+  }
+  for (const k of keys) {
+    const cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedRow[cleanKey] !== undefined && normalizedRow[cleanKey] !== null && String(normalizedRow[cleanKey]).trim() !== '') {
+      return String(normalizedRow[cleanKey]).trim();
+    }
+  }
+  return '';
+}
+
+// Bulk Import Members from CSV with Support for Subscriptions & Payments
+app.post('/api/members/import-csv', async (req, res) => {
+  const { members, updateExisting = true, createSubscriptions = true } = req.body;
+  if (!Array.isArray(members) || members.length === 0) {
+    return res.status(400).json({ error: 'No member records provided to import' });
+  }
+
+  let importedCount = 0;
+  let updatedCount = 0;
+  let subscriptionsCount = 0;
+  let paymentsCount = 0;
+  let plansCreatedCount = 0;
+  const errors = [];
+
+  const today = new Date().toISOString().split('T')[0];
+  const year = new Date().getFullYear();
+
+  for (let i = 0; i < members.length; i++) {
+    const row = members[i];
+    const rowNum = i + 1;
+
+    // 1. Extract member details
+    const fullname = getField(row, ['fullname', 'name', 'full name', 'member name', 'customer name', 'client name', 'fighter name', 'first name']);
+    if (!fullname) {
+      errors.push({ row: rowNum, error: 'Full Name is missing or empty' });
+      continue;
+    }
+
+    const member_code = getField(row, ['member_code', 'code', 'member code', 'member id', 'memberid', 'id', 'membership number', 'membership no', 'reg no', 'sl no', 'roll no', 'card no']);
+    const genderRaw = getField(row, ['gender', 'sex']);
+    const gender = genderRaw ? (genderRaw.toLowerCase().startsWith('f') ? 'Female' : (genderRaw.toLowerCase().startsWith('o') ? 'Other' : 'Male')) : 'Male';
+    
+    const dobRaw = getField(row, ['dob', 'date of birth', 'birth date', 'birthdate', 'age']);
+    const dob = parseFlexibleDate(dobRaw) || '';
+
+    const mobileRaw = getField(row, ['mobile', 'phone', 'contact', 'mobile number', 'phone number', 'contact number', 'cell', 'tel', 'ph']);
+    const mobile = mobileRaw.replace(/[^\d+]/g, '');
+
+    const whatsappRaw = getField(row, ['whatsapp', 'whatsapp number', 'wa', 'whatsapp no', 'mobile', 'phone']);
+    const whatsapp = whatsappRaw.replace(/[^\d+]/g, '') || mobile;
+
+    const email = getField(row, ['email', 'email address', 'mail']);
+    const address = getField(row, ['address', 'residential address', 'location', 'city', 'residence']);
+    const emergency_contact = getField(row, ['emergency_contact', 'emergency contact', 'emergency phone', 'guardian', 'contact person']);
+    const blood_group = getField(row, ['blood_group', 'blood group', 'blood', 'bloodgroup']);
+    
+    const joiningRaw = getField(row, ['joining_date', 'joining date', 'join date', 'joined date', 'registration date', 'created date', 'admission date', 'start date']);
+    const joining_date = parseFlexibleDate(joiningRaw) || today;
+
+    const statusRaw = getField(row, ['status', 'member status', 'account status']);
+    let status = statusRaw ? statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1).toLowerCase() : 'Active';
+    if (!['Active', 'Expired', 'Frozen'].includes(status)) {
+      status = 'Active';
+    }
+
+    const medical_notes = getField(row, ['medical_notes', 'medical notes', 'health notes', 'medical']);
+    const notes = getField(row, ['notes', 'remarks', 'comments', 'description']);
+
+    // 2. Extract plan, subscription & payment details if included in CSV
+    const planName = getField(row, ['plan', 'plan_name', 'plan name', 'membership plan', 'package', 'package name', 'membership type', 'subscription', 'scheme', 'package type']);
+    const planStartDateRaw = getField(row, ['plan_start_date', 'plan start date', 'start date', 'from date', 'effective date', 'subscription start']);
+    const planStartDate = parseFlexibleDate(planStartDateRaw) || joining_date || today;
+
+    const expiryDateRaw = getField(row, ['expiry_date', 'expiry date', 'expiry', 'valid till', 'end date', 'to date', 'due date', 'renewal date', 'expire date']);
+    let expiryDate = parseFlexibleDate(expiryDateRaw);
+
+    const paidAmountRaw = getField(row, ['paid_amount', 'paid amount', 'amount', 'fee', 'fees', 'price', 'total paid', 'paid', 'cost', 'collection', 'payment']);
+    const paidAmount = parseFloat(paidAmountRaw) || 0;
+
+    const paymentMethod = getField(row, ['payment_method', 'payment method', 'payment mode', 'mode', 'payment type', 'type']) || 'Cash';
+    const trainerName = getField(row, ['trainer', 'trainer_name', 'trainer name', 'coach', 'instructor', 'assigned trainer']);
+
+    try {
+      // Find trainer if specified
+      let trainer_id = null;
+      if (trainerName) {
+        const trainer = await db.get(`SELECT id FROM trainers WHERE LOWER(fullname) LIKE LOWER(?) LIMIT 1`, [`%${trainerName}%`]);
+        if (trainer) {
+          trainer_id = trainer.id;
+        }
+      }
+
+      // Check if member already exists
+      let existing = null;
+      if (member_code) {
+        existing = await db.get(`SELECT id, member_code FROM members WHERE member_code = ?`, [member_code]);
+      }
+      if (!existing && mobile) {
+        existing = await db.get(`SELECT id, member_code FROM members WHERE mobile = ?`, [mobile]);
+      }
+
+      let memberId;
+      let finalCode = member_code;
+
+      if (existing && updateExisting) {
+        memberId = existing.id;
+        finalCode = existing.member_code;
+        await db.run(
+          `UPDATE members 
+           SET fullname = ?, gender = ?, dob = ?, mobile = ?, whatsapp = ?, email = ?,
+               address = ?, emergency_contact = ?, blood_group = ?, joining_date = ?,
+               status = ?, medical_notes = ?, notes = ?, trainer_id = COALESCE(?, trainer_id)
+           WHERE id = ?`,
+          [fullname, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, status, medical_notes, notes, trainer_id, memberId]
+        );
+        updatedCount++;
+      } else {
+        const result = await db.run(
+          `INSERT INTO members (member_code, fullname, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, trainer_id, status, medical_notes, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [finalCode || null, fullname, gender, dob, mobile, whatsapp, email, address, emergency_contact, blood_group, joining_date, trainer_id, status, medical_notes, notes]
+        );
+        memberId = result.id;
+
+        if (!finalCode) {
+          finalCode = `FC-${1000 + memberId}`;
+          await db.run(`UPDATE members SET member_code = ? WHERE id = ?`, [finalCode, memberId]);
+        }
+        importedCount++;
+      }
+
+      // 3. Auto-create Subscription & Payment if plan or amount or expiry is present
+      if (createSubscriptions && (planName || paidAmount > 0 || expiryDate)) {
+        let plan = null;
+        if (planName) {
+          plan = await db.get(`SELECT * FROM membership_plans WHERE LOWER(name) = LOWER(?) LIMIT 1`, [planName.trim()]);
+          if (!plan) {
+            // Check partial match
+            plan = await db.get(`SELECT * FROM membership_plans WHERE LOWER(name) LIKE LOWER(?) LIMIT 1`, [`%${planName.trim()}%`]);
+          }
+        }
+
+        // If plan not found in database, create the plan automatically
+        if (!plan) {
+          const newPlanName = planName ? planName.trim() : (paidAmount > 0 ? `Package (₹${paidAmount})` : 'Monthly General Package');
+          let duration = 1;
+          if (newPlanName.toLowerCase().includes('3 month') || newPlanName.toLowerCase().includes('quarterly')) duration = 3;
+          else if (newPlanName.toLowerCase().includes('6 month') || newPlanName.toLowerCase().includes('half year')) duration = 6;
+          else if (newPlanName.toLowerCase().includes('1 year') || newPlanName.toLowerCase().includes('annual') || newPlanName.toLowerCase().includes('yearly')) duration = 12;
+          else if (newPlanName.toLowerCase().includes('lifetime')) duration = 60;
+
+          const planPrice = paidAmount > 0 ? paidAmount : 1000;
+          const planResult = await db.run(
+            `INSERT INTO membership_plans (name, category, duration_months, price, discount, tax, final_amount, features, status)
+             VALUES (?, 'Gym', ?, ?, 0, 0, ?, '["Standard Gym Access"]', 'Active')`,
+            [newPlanName, duration, planPrice, planPrice]
+          );
+          plan = {
+            id: planResult.id,
+            name: newPlanName,
+            duration_months: duration,
+            final_amount: planPrice,
+            price: planPrice,
+            tax: 0
+          };
+          plansCreatedCount++;
+        }
+
+        // Compute expiry date if not explicitly given
+        if (!expiryDate) {
+          const sDate = new Date(planStartDate);
+          sDate.setMonth(sDate.getMonth() + (plan.duration_months || 1));
+          expiryDate = sDate.toISOString().split('T')[0];
+        }
+
+        // Determine subscription status based on expiry date
+        const subStatus = expiryDate < today ? 'Expired' : 'Active';
+
+        // Check if member already has this active subscription
+        const existingSub = await db.get(
+          `SELECT id FROM subscriptions WHERE member_id = ? AND plan_id = ? AND start_date = ?`,
+          [memberId, plan.id, planStartDate]
+        );
+
+        let subscriptionId;
+        if (!existingSub) {
+          const subResult = await db.run(
+            `INSERT INTO subscriptions (member_id, plan_id, start_date, expiry_date, status) VALUES (?, ?, ?, ?, ?)`,
+            [memberId, plan.id, planStartDate, expiryDate, subStatus]
+          );
+          subscriptionId = subResult.id;
+          subscriptionsCount++;
+
+          // Update member status
+          await db.run(`UPDATE members SET status = ? WHERE id = ?`, [subStatus, memberId]);
+        } else {
+          subscriptionId = existingSub.id;
+          await db.run(
+            `UPDATE subscriptions SET expiry_date = ?, status = ? WHERE id = ?`,
+            [expiryDate, subStatus, subscriptionId]
+          );
+        }
+
+        // Create Payment record if amount > 0
+        if (paidAmount > 0) {
+          const existingPayment = await db.get(
+            `SELECT id FROM payments WHERE member_id = ? AND subscription_id = ?`,
+            [memberId, subscriptionId]
+          );
+
+          if (!existingPayment) {
+            const lastInvoice = await db.get(`SELECT invoice_number FROM payments ORDER BY id DESC LIMIT 1`);
+            let nextNum = 1;
+            if (lastInvoice && lastInvoice.invoice_number) {
+              const parts = lastInvoice.invoice_number.split('-');
+              const lastYear = parts[1];
+              const lastSeq = parseInt(parts[2], 10);
+              if (lastYear == year) {
+                nextNum = lastSeq + 1;
+              }
+            }
+            const invoice_number = `INV-${year}-${String(nextNum).padStart(3, '0')}`;
+
+            await db.run(
+              `INSERT INTO payments (invoice_number, payment_date, member_id, subscription_id, amount, discount, tax, paid_amount, balance, payment_method, remarks)
+               VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?)`,
+              [invoice_number, planStartDate, memberId, subscriptionId, paidAmount, paidAmount, paymentMethod, `Imported from CSV - ${plan.name}`]
+            );
+            paymentsCount++;
+          }
+        }
+      }
+
+    } catch (err) {
+      errors.push({ row: rowNum, fullname, error: err.message });
+    }
+  }
+
+  await db.run(
+    `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
+    [1, 'admin', 'CSV Member Import', `Imported ${importedCount} members, updated ${updatedCount}, created ${subscriptionsCount} subscriptions and ${paymentsCount} payments.`]
+  );
+
+  res.json({
+    success: true,
+    imported: importedCount,
+    updated: updatedCount,
+    subscriptions_created: subscriptionsCount,
+    payments_recorded: paymentsCount,
+    plans_created: plansCreatedCount,
+    total: members.length,
+    errors
+  });
 });
 
 // ----------------------------------------------------
@@ -553,17 +888,38 @@ app.get('/api/subscriptions', async (req, res) => {
 });
 
 app.post('/api/subscriptions', async (req, res) => {
-  const { member_id, plan_id, start_date, payment_method, remarks, discount_type, discount_value } = req.body;
+  const { member_id, plan_id, start_date, payment_method, remarks, discount_type, discount_value, admission_fee_already_paid } = req.body;
   
   if (!member_id || !plan_id || !start_date) {
     return res.status(400).json({ error: 'Member, Plan and Start Date are required' });
   }
   
   try {
-    // 1. Get Plan Details
+    // 1. Get Plan & Member Details
     const plan = await db.get(`SELECT * FROM membership_plans WHERE id = ?`, [plan_id]);
     if (!plan) {
       return res.status(404).json({ error: 'Membership plan not found' });
+    }
+
+    const member = await db.get(`SELECT * FROM members WHERE id = ?`, [member_id]);
+    if (!member) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    // Determine if selected plan is an Admission Plan (which bundles ₹1500 admission fee + ₹1000 1-month subscription)
+    const isAdmissionPlan = (plan.id === 1) || (plan.name && plan.name.toLowerCase().includes('admission')) || (plan.price === 2500 && plan.duration_months === 1);
+    
+    // Check if member already paid admission fee
+    const hasAlreadyPaidAdmission = (admission_fee_already_paid !== undefined)
+      ? Boolean(admission_fee_already_paid)
+      : Boolean(member.admission_fee_paid === 1);
+
+    let baseAmount = plan.final_amount;
+    let admissionDeduction = 0;
+
+    if (isAdmissionPlan && hasAlreadyPaidAdmission) {
+      admissionDeduction = 1500;
+      baseAmount = Math.max(0, baseAmount - admissionDeduction);
     }
     
     // 2. Calculate Expiry Date
@@ -573,7 +929,6 @@ app.post('/api/subscriptions', async (req, res) => {
     const expiry_date = expiry.toISOString().split('T')[0];
     
     // 3. Calculate applied discount and final payable amount
-    const baseAmount = plan.final_amount;
     const rawDiscount = parseFloat(discount_value) || 0;
     let appliedDiscount = 0;
     if (rawDiscount > 0) {
@@ -591,8 +946,9 @@ app.post('/api/subscriptions', async (req, res) => {
     const subResult = await db.run(subSql, [member_id, plan_id, start_date, expiry_date]);
     const subscription_id = subResult.id;
     
-    // Update member status to Active
-    await db.run(`UPDATE members SET status = 'Active' WHERE id = ?`, [member_id]);
+    // Update member status to Active and set admission_fee_paid = 1 if they purchased admission plan or had it verified
+    const shouldMarkAdmissionPaid = isAdmissionPlan || hasAlreadyPaidAdmission ? 1 : (member.admission_fee_paid || 0);
+    await db.run(`UPDATE members SET status = 'Active', admission_fee_paid = ? WHERE id = ?`, [shouldMarkAdmissionPaid, member_id]);
     
     // 5. Record Payment
     // Generate Invoice Number (e.g. INV-YYYY-001)
@@ -602,7 +958,7 @@ app.post('/api/subscriptions', async (req, res) => {
     if (lastInvoice && lastInvoice.invoice_number) {
       const parts = lastInvoice.invoice_number.split('-');
       const lastYear = parts[1];
-      const lastSeq = parseInt(parts[2]);
+      const lastSeq = parseInt(parts[2], 10);
       if (lastYear == year) {
         nextNum = lastSeq + 1;
       }
@@ -610,23 +966,28 @@ app.post('/api/subscriptions', async (req, res) => {
     const invoice_number = `INV-${year}-${String(nextNum).padStart(3, '0')}`;
     const today = new Date().toISOString().split('T')[0];
     
+    let defaultRemarks = `Subscription for ${plan.name}`;
+    if (admissionDeduction > 0) {
+      defaultRemarks += ` (Admission fee of ₹1500 already paid / deducted)`;
+    }
+
     const paySql = `INSERT INTO payments (invoice_number, payment_date, member_id, subscription_id, amount, discount, tax, paid_amount, balance, payment_method, remarks)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
                     
     const payResult = await db.run(paySql, [
       invoice_number, today, member_id, subscription_id,
-      plan.price,
+      plan.price - admissionDeduction,
       appliedDiscount,  // applied discount amount
       plan.tax,
       paid_amount,      // final payable after discount
       0,
       payment_method || 'Cash',
-      remarks || `Subscription for ${plan.name}`
+      remarks || defaultRemarks
     ]);
     
     await db.run(
       `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
-      [1, 'admin', 'Subscription Created', `Created subscription ID: ${subscription_id} for Member ID: ${member_id}${appliedDiscount > 0 ? ` (Discount: ₹${appliedDiscount})` : ''}`]
+      [1, 'admin', 'Subscription Created', `Created subscription ID: ${subscription_id} for Member: ${member.fullname}${admissionDeduction > 0 ? ` (Admission Fee Waived: ₹1500)` : ''}${appliedDiscount > 0 ? ` (Discount: ₹${appliedDiscount})` : ''}`]
     );
 
     let whatsappSent = false;
@@ -676,20 +1037,52 @@ app.post('/api/subscriptions', async (req, res) => {
   }
 });
 
-// Update Subscription: Cancel, Freeze, Resume
+// Delete / Erase Subscription (Erases dates, keeps member active)
+app.delete('/api/subscriptions/:id', async (req, res) => {
+  try {
+    const sub = await db.get(
+      `SELECT s.*, m.fullname FROM subscriptions s LEFT JOIN members m ON s.member_id = m.id WHERE s.id = ?`,
+      [req.params.id]
+    );
+    if (!sub) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+
+    // 1. Unlink subscription_id on payments so financial invoice history is preserved
+    await db.run(`UPDATE payments SET subscription_id = NULL WHERE subscription_id = ?`, [req.params.id]);
+
+    // 2. Delete subscription record (erasing the plan dates)
+    await db.run(`DELETE FROM subscriptions WHERE id = ?`, [req.params.id]);
+
+    // 3. Ensure member remains 100% active (Do NOT cancel membership)
+    await db.run(`UPDATE members SET status = 'Active' WHERE id = ?`, [sub.member_id]);
+
+    await db.run(
+      `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
+      [1, 'admin', 'Subscription Dates Erased', `Erased subscription dates for member: ${sub.fullname || sub.member_id}. Membership remains Active.`]
+    );
+
+    res.json({ success: true, message: 'Subscription dates erased successfully. Membership remains active.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Subscription Status: Freeze or Resume (Never cancels the member)
 app.post('/api/subscriptions/:id/status', async (req, res) => {
-  const { status } = req.body; // 'Frozen', 'Active', 'Expired'
+  const { status } = req.body; // 'Frozen', 'Active'
   if (!status) return res.status(400).json({ error: 'Status is required' });
   
   try {
     await db.run(`UPDATE subscriptions SET status = ? WHERE id = ?`, [status, req.params.id]);
     
+    // Always keep member status Active
     const sub = await db.get(`SELECT member_id FROM subscriptions WHERE id = ?`, [req.params.id]);
-    if (sub) {
-      await db.run(`UPDATE members SET status = ? WHERE id = ?`, [status, sub.member_id]);
+    if (sub && status === 'Active') {
+      await db.run(`UPDATE members SET status = 'Active' WHERE id = ?`, [sub.member_id]);
     }
     
-    res.json({ success: true });
+    res.json({ success: true, message: `Subscription marked as ${status}.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -758,6 +1151,125 @@ app.delete('/api/payments/:id', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Bulk Import Payments / Payment Status from CSV
+app.post('/api/payments/import-csv', async (req, res) => {
+  const { payments } = req.body;
+  if (!Array.isArray(payments) || payments.length === 0) {
+    return res.status(400).json({ error: 'No payment records provided to import' });
+  }
+
+  let importedCount = 0;
+  const errors = [];
+  const year = new Date().getFullYear();
+
+  for (let i = 0; i < payments.length; i++) {
+    const row = payments[i];
+    const rowNum = i + 1;
+
+    // Identify member
+    const code = (row.member_code || row.code || row['Member Code'] || row['member code'] || row.MemberCode || row['Code'] || '').trim();
+    const mobile = (row.mobile || row.phone || row['Mobile'] || row['mobile number'] || row['Mobile Number'] || row.Phone || '').trim();
+    const name = (row.member_name || row.fullname || row.name || row['Member Name'] || row['member name'] || row['Full Name'] || row['full name'] || '').trim();
+
+    let member = null;
+    if (code) {
+      member = await db.get(`SELECT id, fullname, status FROM members WHERE member_code = ?`, [code]);
+    }
+    if (!member && mobile) {
+      member = await db.get(`SELECT id, fullname, status FROM members WHERE mobile = ?`, [mobile]);
+    }
+    if (!member && name) {
+      member = await db.get(`SELECT id, fullname, status FROM members WHERE fullname LIKE ?`, [`%${name}%`]);
+    }
+
+    if (!member) {
+      errors.push({ row: rowNum, error: `Member not found for Code: "${code}", Mobile: "${mobile}", Name: "${name}"` });
+      continue;
+    }
+
+    // Payment fields
+    const payment_date = (row.payment_date || row.date || row['Payment Date'] || row['payment date'] || row['Transaction Date'] || row['transaction date'] || new Date().toISOString().split('T')[0]).trim();
+    const amount = parseFloat(row.amount || row['Base Amount'] || row['base amount'] || row.price || row.Price || 0) || 0;
+    const discount = parseFloat(row.discount || row.Discount || 0) || 0;
+    const tax = parseFloat(row.tax || row.Tax || row.gst || row.GST || 0) || 0;
+    const paid_amount = parseFloat(row.paid_amount || row.paid || row['Paid Amount'] || row['paid amount'] || row['Final Paid'] || row['final paid'] || amount) || 0;
+    const balance = parseFloat(row.balance || row.Balance || row['Pending Balance'] || 0) || 0;
+    const payment_method = (row.payment_method || row.method || row['Payment Method'] || row['payment method'] || row['Method'] || 'Cash').trim();
+    const remarks = (row.remarks || row.memo || row.notes || row['Remarks'] || 'CSV Import').trim();
+
+    // Invoice number
+    let invoice_number = (row.invoice_number || row.invoice || row['Invoice Number'] || row['invoice number'] || row['Invoice No'] || '').trim();
+    if (!invoice_number) {
+      const lastInvoice = await db.get(`SELECT invoice_number FROM payments ORDER BY id DESC LIMIT 1`);
+      let nextNum = 1;
+      if (lastInvoice && lastInvoice.invoice_number) {
+        const parts = lastInvoice.invoice_number.split('-');
+        const lastYear = parts[1];
+        const lastSeq = parseInt(parts[2]);
+        if (lastYear == year) {
+          nextNum = lastSeq + 1;
+        }
+      }
+      invoice_number = `INV-${year}-${String(nextNum).padStart(3, '0')}`;
+    }
+
+    // Plan and Subscription mapping if provided
+    const planName = (row.plan_name || row.plan || row['Plan Name'] || row['plan name'] || row['Plan'] || row.membership_plan || '').trim();
+    let subscription_id = null;
+
+    if (planName) {
+      const plan = await db.get(`SELECT * FROM membership_plans WHERE name LIKE ?`, [`%${planName}%`]);
+      if (plan) {
+        const start = new Date(payment_date);
+        const expiry = new Date(start);
+        expiry.setMonth(start.getMonth() + plan.duration_months);
+        const expiry_date = expiry.toISOString().split('T')[0];
+
+        const subRes = await db.run(
+          `INSERT INTO subscriptions (member_id, plan_id, start_date, expiry_date, status) VALUES (?, ?, ?, ?, 'Active')`,
+          [member.id, plan.id, payment_date, expiry_date]
+        );
+        subscription_id = subRes.id;
+      }
+    }
+
+    if (!subscription_id) {
+      const latestSub = await db.get(`SELECT id FROM subscriptions WHERE member_id = ? ORDER BY id DESC LIMIT 1`, [member.id]);
+      if (latestSub) {
+        subscription_id = latestSub.id;
+      }
+    }
+
+    try {
+      await db.run(
+        `INSERT INTO payments (invoice_number, payment_date, member_id, subscription_id, amount, discount, tax, paid_amount, balance, payment_method, remarks)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [invoice_number, payment_date, member.id, subscription_id, amount, discount, tax, paid_amount, balance, payment_method, remarks]
+      );
+
+      if (paid_amount > 0 && member.status !== 'Active') {
+        await db.run(`UPDATE members SET status = 'Active' WHERE id = ?`, [member.id]);
+      }
+
+      importedCount++;
+    } catch (err) {
+      errors.push({ row: rowNum, invoice_number, error: err.message });
+    }
+  }
+
+  await db.run(
+    `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
+    [1, 'admin', 'CSV Payments Import', `Imported ${importedCount} payment records from CSV.`]
+  );
+
+  res.json({
+    success: true,
+    imported: importedCount,
+    total: payments.length,
+    errors
+  });
 });
 
 // ----------------------------------------------------
@@ -1302,6 +1814,51 @@ app.post('/api/settings', upload.single('logo'), async (req, res) => {
     ]);
     
     res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Full Database Reset (Members, Subscriptions, Payments, Expenses, Attendance, Logs)
+app.post('/api/settings/reset-database', async (req, res) => {
+  try {
+    // 1. Create safety backup first
+    try {
+      await backup.createBackup('Pre-Reset-Auto');
+    } catch (bErr) {
+      console.warn('Pre-reset backup warning:', bErr.message);
+    }
+
+    // 2. Clear transactional and member data tables
+    const tablesToClear = [
+      'members',
+      'subscriptions',
+      'payments',
+      'expenses',
+      'attendance',
+      'reminder_logs',
+      'whatsapp_queue',
+      'whatsapp_logs',
+      'activity_logs'
+    ];
+
+    for (const table of tablesToClear) {
+      await db.run(`DELETE FROM ${table}`);
+      try {
+        await db.run(`DELETE FROM sqlite_sequence WHERE name = ?`, [table]);
+      } catch (e) {}
+    }
+
+    // 3. Log the reset action
+    await db.run(
+      `INSERT INTO activity_logs (user_id, username, action, details) VALUES (?, ?, ?, ?)`,
+      [1, 'admin', 'Database Reset', 'Complete database reset performed. All members, subscriptions, payments, expenses, and logs cleared.']
+    );
+
+    res.json({
+      success: true,
+      message: 'Database reset successfully! All member records, subscriptions, payments, and logs have been cleared.'
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

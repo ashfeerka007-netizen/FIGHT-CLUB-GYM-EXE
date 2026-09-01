@@ -20,22 +20,29 @@ const PlansView = {
           <div class="plans-list-wrapper" style="display:flex; flex-direction:column; gap:var(--spacing-md);">
             ${PlansView.plans.length === 0 ? `
               <div class="empty-state"><p>No membership plans created yet.</p></div>
-            ` : PlansView.plans.map(p => `
-              <div class="plan-item-card" style="border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--spacing-md); background: rgba(0,0,0,0.05); display:flex; justify-content:between; align-items:center;">
+            ` : PlansView.plans.map(p => {
+              const isAdm = p.id === 1 || p.name.toLowerCase().includes('admission');
+              return `
+              <div class="plan-item-card" style="border: 1px solid ${isAdm ? 'var(--color-primary)' : 'var(--color-border)'}; border-radius: var(--radius-md); padding: var(--spacing-md); background: ${isAdm ? 'rgba(220,38,38,0.03)' : 'rgba(0,0,0,0.05)'}; display:flex; justify-content:between; align-items:center;">
                 <div>
                   <div class="flex align-center gap-sm">
-                    <span class="badge" style="background-color: var(--color-primary); color:#fff; font-size:0.65rem;">${p.category}</span>
+                    <span class="badge" style="background-color: ${isAdm ? 'var(--color-primary)' : 'var(--color-bg-card-hover)'}; color:#fff; font-size:0.65rem;">${p.category}</span>
                     <strong style="font-size:1.05rem;">${p.name}</strong>
+                    ${isAdm ? `<span class="badge" style="background:rgba(34,197,94,0.15); color:var(--color-success); font-size:0.65rem; border:1px solid rgba(34,197,94,0.3);">Admission + 1 Mo</span>` : ''}
                   </div>
                   <div style="font-size: 0.85rem; color: var(--color-text-muted); margin-top:4px;">
-                    Duration: <strong>${p.duration_months} Months</strong> | 
-                    Price: <strong>${currencySymbol}${p.price}</strong> | 
-                    Discount: <strong>${p.discount}%</strong> | 
-                    Tax: <strong>${p.tax}%</strong>
+                    Duration: <strong>${p.duration_months} Month${p.duration_months > 1 ? 's' : ''}</strong> | 
+                    Base Price: <strong>${currencySymbol}${p.price}</strong>
+                    ${isAdm ? ` <span style="color:var(--color-primary); font-size:0.75rem;">(₹1,500 Admission Fee + ₹1,000 Subscription)</span>` : ''}
                   </div>
                   <div class="plan-features-list text-xs text-muted" style="margin-top:6px;">
                     Features: ${JSON.parse(p.features || '[]').join(', ') || 'None'}
                   </div>
+                  ${isAdm ? `
+                    <div style="font-size:0.75rem; color:var(--color-success); margin-top:4px;">
+                      💡 Note: If Admission Fee is already paid, plan reduces by ₹1,500 (Payable: ₹1,000).
+                    </div>
+                  ` : ''}
                 </div>
                 <div style="text-align:right;">
                   <div style="font-size:1.25rem; font-family:var(--font-secondary); font-weight:700; color:var(--color-success);">
@@ -48,7 +55,8 @@ const PlansView = {
                   </div>
                 </div>
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
         </div>
 

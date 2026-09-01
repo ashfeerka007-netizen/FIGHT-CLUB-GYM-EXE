@@ -77,6 +77,8 @@ async function initializeDatabase() {
     console.log('Loading seed data...');
     await executeSqlFile(seedPath);
     console.log('Seed data loaded successfully.');
+
+    await applyMigrations();
   } catch (error) {
     console.error('Error initializing database:', error);
   }
@@ -86,8 +88,39 @@ async function runSchemaOnly() {
   try {
     const schemaPath = path.join(dbDir, 'schema.sql');
     await executeSqlFile(schemaPath);
+    await applyMigrations();
   } catch (error) {
     console.error('Error executing schema check:', error);
+  }
+}
+
+async function applyMigrations() {
+  try {
+    // 1. Ensure admission_fee_paid column exists in members table
+    try {
+      await dbHelper.run(`ALTER TABLE members ADD COLUMN admission_fee_paid INTEGER DEFAULT 0`);
+    } catch (e) {
+      // Column already exists
+    }
+
+    // 2. Ensure Admission Plan details are up-to-date
+    const admissionPlan = await dbHelper.get(`SELECT id FROM membership_plans WHERE id = 1 OR LOWER(name) LIKE '%admission%' LIMIT 1`);
+    if (admissionPlan) {
+      await dbHelper.run(
+        `UPDATE membership_plans 
+         SET name = 'Admission Plan (₹1500 Admission + 1 Month ₹1000)',
+             duration_months = 1,
+             price = 2500,
+             discount = 0,
+             tax = 0,
+             final_amount = 2500,
+             features = '["One-time ₹1500 Admission Fee Included", "1 Month Gym Subscription Included (₹1000)", "Registration and ID Card", "Locker activation"]'
+         WHERE id = ?`,
+        [admissionPlan.id]
+      );
+    }
+  } catch (err) {
+    console.error('Migration note:', err.message);
   }
 }
 

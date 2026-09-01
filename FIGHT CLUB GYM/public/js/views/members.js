@@ -1,10 +1,10 @@
 // Members Directory View for Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm } from '../utils.js';
+import { showToast, showConfirm, parseCSV, downloadCSV } from '../utils.js';
 
 const MembersView = {
   members: [],
-  filters: { search: '', status: '', sort: 'fullname', order: 'ASC' },
+  filters: { search: '', status: '', sort: 'fullname', order: 'ASC', date_from: '', date_to: '', date_type: 'joining' },
   
   render: async (container) => {
     // 1. Fetch initial members list
@@ -14,21 +14,46 @@ const MembersView = {
     container.innerHTML = `
       <div class="members-view-container">
         <!-- Table Actions & Filters -->
-        <div class="table-header-actions">
-          <div class="table-filters">
-            <input type="text" id="search-members" placeholder="Search name, code, phone..." value="${MembersView.filters.search}">
+        <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:15px;">
+          <div class="table-header-actions" style="margin-bottom:0;">
+            <div class="table-filters" style="flex:1; display:flex; gap:8px; flex-wrap:wrap;">
+              <input type="text" id="search-members" placeholder="🔍 Search name, code, phone, email..." value="${MembersView.filters.search}" style="flex:1; min-width:200px;">
+              
+              <select id="filter-status" style="width:130px;">
+                <option value="">All Statuses</option>
+                <option value="Active" ${MembersView.filters.status === 'Active' ? 'selected' : ''}>Active</option>
+                <option value="Expired" ${MembersView.filters.status === 'Expired' ? 'selected' : ''}>Expired</option>
+                <option value="Frozen" ${MembersView.filters.status === 'Frozen' ? 'selected' : ''}>Frozen</option>
+              </select>
+            </div>
             
-            <select id="filter-status">
-              <option value="">All Statuses</option>
-              <option value="Active" ${MembersView.filters.status === 'Active' ? 'selected' : ''}>Active</option>
-              <option value="Expired" ${MembersView.filters.status === 'Expired' ? 'selected' : ''}>Expired</option>
-              <option value="Frozen" ${MembersView.filters.status === 'Frozen' ? 'selected' : ''}>Frozen</option>
-            </select>
+            <div class="flex gap-sm">
+              <button class="btn btn-secondary" id="btn-export-csv"><i data-lucide="download"></i> Export CSV</button>
+              <button class="btn btn-secondary" id="btn-import-csv"><i data-lucide="upload"></i> Import CSV</button>
+              <button class="btn btn-primary" id="btn-add-member"><i data-lucide="user-plus"></i> Register Member</button>
+            </div>
           </div>
-          
-          <div class="flex gap-sm">
-            <button class="btn btn-secondary" id="btn-export-csv"><i data-lucide="download"></i> Export CSV</button>
-            <button class="btn btn-primary" id="btn-add-member"><i data-lucide="user-plus"></i> Register Member</button>
+
+          <!-- Date Filter Bar for Members -->
+          <div class="date-filter-bar" style="justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span style="font-size:0.8rem; color:var(--color-text-muted); font-weight:600;"><i data-lucide="calendar" style="width:14px;height:14px;display:inline-block;vertical-align:middle;"></i> Date Filter:</span>
+              <select id="filter-member-date-type" style="padding:4px 8px; font-size:0.8rem; border-radius:var(--radius-sm); border:1px solid var(--color-border); background:var(--color-bg-card);">
+                <option value="joining" ${MembersView.filters.date_type === 'joining' ? 'selected' : ''}>Joining Date</option>
+                <option value="expiry" ${MembersView.filters.date_type === 'expiry' ? 'selected' : ''}>Plan Expiry Date</option>
+              </select>
+              <input type="date" id="filter-member-date-from" class="date-input-field" title="From Date" value="${MembersView.filters.date_from || ''}">
+              <span style="font-size:0.8rem; color:var(--color-text-muted);">to</span>
+              <input type="date" id="filter-member-date-to" class="date-input-field" title="To Date" value="${MembersView.filters.date_to || ''}">
+
+              <button type="button" class="date-preset-pill" id="mem-preset-all">All</button>
+              <button type="button" class="date-preset-pill" id="mem-preset-this-month">This Month</button>
+              <button type="button" class="date-preset-pill" id="mem-preset-exp-7">Expiring ≤7d</button>
+              <button type="button" class="date-preset-pill" id="mem-preset-clear" title="Clear Date Filter"><i data-lucide="x" style="width:11px;height:11px;"></i> Clear</button>
+            </div>
+            <div id="members-count-metric" style="font-size:0.85rem; font-weight:700; color:var(--color-primary); padding-right:6px;">
+              ${MembersView.members.length} Fighters
+            </div>
           </div>
         </div>
 
@@ -174,6 +199,13 @@ const MembersView = {
                     <label for="reg-medical">Medical Notes</label>
                     <input type="text" id="reg-medical" placeholder="Asthma, joint pain, etc.">
                   </div>
+
+                  <div class="form-group" style="background: rgba(220,38,38,0.05); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px dashed var(--color-border); margin-top: 10px;">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.875rem; margin:0;">
+                      <input type="checkbox" id="reg-admission-fee-paid" style="width:16px; height:16px;">
+                      <span><strong>Admission Fee Paid (₹1,500)</strong> <span style="font-size:0.75rem; color:var(--color-text-muted);">(Waiver on Admission Plan)</span></span>
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -205,6 +237,66 @@ const MembersView = {
           </div>
           <div class="modal-body" id="drawer-body-content">
             <!-- Loaded dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Member CSV Import Modal -->
+      <div id="member-import-modal" class="modal-overlay hidden">
+        <div class="modal-card" style="max-width: 720px;">
+          <div class="modal-header">
+            <h2><i data-lucide="upload" style="margin-right:8px;"></i> Import Gym Data from CSV</h2>
+            <button class="btn-close-import-modal"><i data-lucide="x"></i></button>
+          </div>
+          <div class="modal-body" style="display:flex; flex-direction:column; gap: var(--spacing-md); max-height: 540px; overflow-y: auto;">
+            
+            <div id="member-csv-dropzone" style="background: rgba(220,38,38,0.05); border: 2px dashed var(--color-border); border-radius: var(--radius-md); padding: var(--spacing-lg); text-align: center; cursor: pointer; transition: border-color 0.2s;">
+              <i data-lucide="file-spreadsheet" style="width: 44px; height: 44px; color: var(--color-primary); margin-bottom: 8px;"></i>
+              <p style="margin-bottom: 12px; font-size: 0.95rem; font-weight: 500;">Select or drag & drop your <strong>.CSV</strong> file here</p>
+              <input type="file" id="member-csv-file" accept=".csv,text/csv" style="display:none;">
+              <div class="flex justify-center gap-sm" style="flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary" id="btn-browse-member-csv"><i data-lucide="folder-open"></i> Browse CSV File</button>
+                <button type="button" class="btn btn-secondary" id="btn-download-member-template"><i data-lucide="download"></i> Download Full CSV Template</button>
+              </div>
+              <div id="member-csv-filename" style="margin-top: 12px; font-weight: 600; color: var(--color-primary); display: none;"></div>
+            </div>
+
+            <!-- Import Options -->
+            <div style="background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.875rem;">
+                <input type="checkbox" id="chk-update-existing-members" checked style="width:16px; height:16px;">
+                <span><strong>Update existing members</strong> if Member Code or Mobile number matches</span>
+              </label>
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.875rem;">
+                <input type="checkbox" id="chk-create-subs-payments" checked style="width:16px; height:16px;">
+                <span><strong>Auto-create Subscriptions & Payments</strong> if Plan, Expiry Date, or Paid Amount columns are present</span>
+              </label>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; padding: 2px;">
+              <div id="member-detected-badges" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+              <span id="member-import-row-count" style="font-size:0.85rem; color:var(--color-text-muted); font-weight:600;"></span>
+            </div>
+
+            <!-- CSV Preview Section -->
+            <div id="member-import-preview-section" style="display:none;">
+              <h4 style="font-size: 0.9rem; font-weight:700; margin-bottom: 6px;">Data Preview (First 5 Rows):</h4>
+              <div class="table-container" style="max-height: 180px; overflow-y: auto;">
+                <table style="font-size: 0.8rem;">
+                  <thead>
+                    <tr id="member-preview-header"></tr>
+                  </thead>
+                  <tbody id="member-preview-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Import Status / Results -->
+            <div id="member-import-status" style="display:none; padding: 12px; border-radius: var(--radius-sm); font-size: 0.9rem; line-height: 1.5;"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-close-import-modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-submit-member-import" disabled><i data-lucide="check"></i> Start Import</button>
           </div>
         </div>
       </div>
@@ -350,6 +442,106 @@ const MembersView = {
       await MembersView.fetchMembers();
       MembersView.renderList();
     });
+
+    // Date Filter Listeners
+    const dateTypeSelect = document.getElementById('filter-member-date-type');
+    const dateFromInput = document.getElementById('filter-member-date-from');
+    const dateToInput = document.getElementById('filter-member-date-to');
+
+    if (dateTypeSelect) {
+      dateTypeSelect.addEventListener('change', async (e) => {
+        MembersView.filters.date_type = e.target.value;
+        if (MembersView.filters.date_from || MembersView.filters.date_to) {
+          await MembersView.fetchMembers();
+          MembersView.renderList();
+        }
+      });
+    }
+
+    if (dateFromInput) {
+      dateFromInput.addEventListener('change', async (e) => {
+        MembersView.filters.date_from = e.target.value;
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
+
+    if (dateToInput) {
+      dateToInput.addEventListener('change', async (e) => {
+        MembersView.filters.date_to = e.target.value;
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
+
+    // Date Presets
+    const memPresetAll = document.getElementById('mem-preset-all');
+    const memPresetThisMonth = document.getElementById('mem-preset-this-month');
+    const memPresetExp7 = document.getElementById('mem-preset-exp-7');
+    const memPresetClear = document.getElementById('mem-preset-clear');
+
+    if (memPresetAll) {
+      memPresetAll.addEventListener('click', async () => {
+        MembersView.filters.date_from = '';
+        MembersView.filters.date_to = '';
+        MembersView.filters.status = '';
+        if (dateFromInput) dateFromInput.value = '';
+        if (dateToInput) dateToInput.value = '';
+        if (filterStatus) filterStatus.value = '';
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
+
+    if (memPresetThisMonth) {
+      memPresetThisMonth.addEventListener('click', async () => {
+        const today = new Date();
+        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+        const fromStr = firstDay.toISOString().split('T')[0];
+        const toStr = today.toISOString().split('T')[0];
+        
+        MembersView.filters.date_type = 'joining';
+        MembersView.filters.date_from = fromStr;
+        MembersView.filters.date_to = toStr;
+        if (dateTypeSelect) dateTypeSelect.value = 'joining';
+        if (dateFromInput) dateFromInput.value = fromStr;
+        if (dateToInput) dateToInput.value = toStr;
+
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
+
+    if (memPresetExp7) {
+      memPresetExp7.addEventListener('click', async () => {
+        const today = new Date();
+        const next7 = new Date();
+        next7.setDate(today.getDate() + 7);
+        const fromStr = today.toISOString().split('T')[0];
+        const toStr = next7.toISOString().split('T')[0];
+
+        MembersView.filters.date_type = 'expiry';
+        MembersView.filters.date_from = fromStr;
+        MembersView.filters.date_to = toStr;
+        if (dateTypeSelect) dateTypeSelect.value = 'expiry';
+        if (dateFromInput) dateFromInput.value = fromStr;
+        if (dateToInput) dateToInput.value = toStr;
+
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
+
+    if (memPresetClear) {
+      memPresetClear.addEventListener('click', async () => {
+        MembersView.filters.date_from = '';
+        MembersView.filters.date_to = '';
+        if (dateFromInput) dateFromInput.value = '';
+        if (dateToInput) dateToInput.value = '';
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+      });
+    }
     
     // Sorting
     document.querySelectorAll('#members-table th.sortable').forEach(th => {
@@ -471,6 +663,7 @@ const MembersView = {
       formData.append('medical_notes', document.getElementById('reg-medical')?.value || '');
       formData.append('emergency_contact', document.getElementById('reg-emergency')?.value || '');
       formData.append('notes', document.getElementById('reg-notes')?.value || '');
+      formData.append('admission_fee_paid', document.getElementById('reg-admission-fee-paid')?.checked ? '1' : '0');
       
       if (photoInput.files[0]) {
         formData.append('photo', photoInput.files[0]);
@@ -494,33 +687,279 @@ const MembersView = {
       }
     });
     
-    // Export CSV
+    // ----------------------------------------------------
+    // CSV EXPORT (Full Member Attributes)
+    // ----------------------------------------------------
     const exportBtn = document.getElementById('btn-export-csv');
     exportBtn.addEventListener('click', () => {
-      if (MembersView.members.length === 0) return;
+      if (MembersView.members.length === 0) {
+        showToast('No member records to export.', 'warning');
+        return;
+      }
       
-      const headers = ['Code', 'Full Name', 'Gender', 'Mobile', 'Email', 'Joining Date', 'Status'];
+      const headers = [
+        'Member Code', 'Full Name', 'Gender', 'Date of Birth', 'Mobile',
+        'WhatsApp', 'Email', 'Blood Group', 'Address', 'Emergency Contact',
+        'Joining Date', 'Plan Name', 'Plan Expiry', 'Trainer', 'Status',
+        'Medical Notes', 'Notes'
+      ];
+      
       const rows = MembersView.members.map(m => [
-        m.member_code,
-        m.fullname,
-        m.gender,
-        m.mobile,
-        m.email,
-        m.joining_date,
-        m.status
+        m.member_code || '',
+        m.fullname || '',
+        m.gender || '',
+        m.dob || '',
+        m.mobile || '',
+        m.whatsapp || '',
+        m.email || '',
+        m.blood_group || '',
+        m.address || '',
+        m.emergency_contact || '',
+        m.joining_date || '',
+        m.plan_name || 'No Plan',
+        m.expiry_date || 'N/A',
+        m.trainer_name || 'None',
+        m.status || 'Active',
+        m.medical_notes || '',
+        m.notes || ''
       ]);
       
-      let csvContent = "data:text/csv;charset=utf-8," 
-        + [headers.join(','), ...rows.map(e => e.map(val => `"${val}"`).join(","))].join("\n");
-      
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `fightclub_members_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      showToast('Members exported successfully.', 'success');
+      const filename = `fightclub_members_${new Date().toISOString().split('T')[0]}.csv`;
+      downloadCSV(filename, headers, rows);
+      showToast(`Exported ${rows.length} member records to ${filename}`, 'success');
+    });
+
+    // ----------------------------------------------------
+    // CSV IMPORT MODAL & PARSING
+    // ----------------------------------------------------
+    const importModal = document.getElementById('member-import-modal');
+    const importBtn = document.getElementById('btn-import-csv');
+    const closeImportBtns = document.querySelectorAll('.btn-close-import-modal');
+    const browseFileBtn = document.getElementById('btn-browse-member-csv');
+    const csvFileInput = document.getElementById('member-csv-file');
+    const csvFilenameEl = document.getElementById('member-csv-filename');
+    const previewSection = document.getElementById('member-import-preview-section');
+    const previewHeader = document.getElementById('member-preview-header');
+    const previewBody = document.getElementById('member-preview-body');
+    const rowCountEl = document.getElementById('member-import-row-count');
+    const submitImportBtn = document.getElementById('btn-submit-member-import');
+    const templateBtn = document.getElementById('btn-download-member-template');
+    const importStatusEl = document.getElementById('member-import-status');
+
+    let parsedMemberRows = [];
+
+    // Open Modal
+    importBtn.addEventListener('click', () => {
+      parsedMemberRows = [];
+      csvFileInput.value = '';
+      csvFilenameEl.style.display = 'none';
+      previewSection.style.display = 'none';
+      importStatusEl.style.display = 'none';
+      rowCountEl.textContent = '';
+      submitImportBtn.disabled = true;
+      importModal.classList.remove('hidden');
+      lucide.createIcons();
+    });
+
+    // Close Modal
+    closeImportBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        importModal.classList.add('hidden');
+      });
+    });
+
+    // Browse Button
+    browseFileBtn.addEventListener('click', () => {
+      csvFileInput.click();
+    });
+
+    const dropzone = document.getElementById('member-csv-dropzone');
+    const detectedBadgesEl = document.getElementById('member-detected-badges');
+
+    // Drag and Drop support
+    if (dropzone) {
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.style.borderColor = 'var(--color-primary)';
+          dropzone.style.background = 'rgba(220,38,38,0.12)';
+        });
+      });
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.style.borderColor = 'var(--color-border)';
+          dropzone.style.background = 'rgba(220,38,38,0.05)';
+        });
+      });
+      dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) {
+          csvFileInput.files = files;
+          handleCSVFile(files[0]);
+        }
+      });
+      dropzone.addEventListener('click', (e) => {
+        if (e.target.id !== 'btn-download-member-template' && !e.target.closest('#btn-download-member-template')) {
+          csvFileInput.click();
+        }
+      });
+    }
+
+    // Download Sample Template with all supported columns
+    templateBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sampleHeaders = [
+        'Member Code', 'Full Name', 'Mobile', 'WhatsApp', 'Gender', 'Date of Birth',
+        'Email', 'Address', 'Blood Group', 'Joining Date', 'Plan', 'Plan Start Date',
+        'Expiry Date', 'Paid Amount', 'Payment Method', 'Trainer', 'Status', 'Medical Notes', 'Notes'
+      ];
+      const sampleRows = [
+        [
+          'FC-1001', 'Rahul Sharma', '9876543210', '9876543210', 'Male', '1995-04-12',
+          'rahul@gym.com', '123 MG Road, Bangalore', 'O+', '2026-01-10', '1 Year Package', '2026-01-10',
+          '2027-01-09', '8500', 'UPI', 'Tyler Durden', 'Active', 'No medical issues', 'Regular morning batch'
+        ],
+        [
+          'FC-1002', 'Priya Patel', '9876543211', '9876543211', 'Female', '1998-08-22',
+          'priya@gym.com', '45 Park Street, Mumbai', 'B+', '2026-02-01', '3 Month Package', '2026-02-01',
+          '2026-05-01', '4200', 'Cash', 'Marla Singer', 'Active', 'Mild back pain', 'Evening batch'
+        ],
+        [
+          'FC-1003', 'Vikram Singh', '9876543212', '9876543212', 'Male', '1992-11-05',
+          'vikram@gym.com', '78 Ring Road, Delhi', 'A+', '2026-03-15', 'Monthly Package', '2026-03-15',
+          '2026-04-15', '1000', 'Card', 'Robert Paulson', 'Active', 'None', 'Weight training focus'
+        ]
+      ];
+      downloadCSV('fight_club_gym_members_template.csv', sampleHeaders, sampleRows);
+      showToast('Downloaded sample CSV template with all fields.', 'info');
+    });
+
+    function handleCSVFile(file) {
+      if (!file) return;
+
+      csvFilenameEl.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      csvFilenameEl.style.display = 'block';
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const csvText = event.target.result;
+          const { headers, rows } = parseCSV(csvText);
+
+          if (rows.length === 0) {
+            showToast('The selected CSV file appears to be empty or invalid.', 'warning');
+            submitImportBtn.disabled = true;
+            return;
+          }
+
+          parsedMemberRows = rows;
+          rowCountEl.textContent = `Total rows: ${rows.length}`;
+
+          // Detect column features
+          const lowerHeaders = headers.map(h => h.toLowerCase());
+          const detected = [];
+          if (lowerHeaders.some(h => h.includes('name'))) detected.push('✓ Name');
+          if (lowerHeaders.some(h => h.includes('mobile') || h.includes('phone') || h.includes('contact'))) detected.push('✓ Phone');
+          if (lowerHeaders.some(h => h.includes('plan') || h.includes('package'))) detected.push('✓ Plan/Package');
+          if (lowerHeaders.some(h => h.includes('expiry') || h.includes('till') || h.includes('due') || h.includes('end'))) detected.push('✓ Expiry Date');
+          if (lowerHeaders.some(h => h.includes('amount') || h.includes('paid') || h.includes('fee') || h.includes('price'))) detected.push('✓ Fee / Amount');
+          if (lowerHeaders.some(h => h.includes('code') || h.includes('id') || h.includes('no'))) detected.push('✓ Member ID');
+
+          if (detectedBadgesEl) {
+            detectedBadgesEl.innerHTML = detected.map(d => `<span style="font-size:0.75rem; background:rgba(34,197,94,0.15); color:var(--color-success); padding:2px 8px; border-radius:4px; border:1px solid rgba(34,197,94,0.3); font-weight:600;">${d}</span>`).join(' ');
+          }
+
+          // Display preview (up to 5 rows)
+          const displayHeaders = headers.slice(0, 7);
+          previewHeader.innerHTML = displayHeaders.map(h => `<th>${h}</th>`).join('');
+          previewBody.innerHTML = rows.slice(0, 5).map(r => {
+            return `<tr>${displayHeaders.map(h => `<td>${r[h] || '-'}</td>`).join('')}</tr>`;
+          }).join('');
+
+          previewSection.style.display = 'block';
+          submitImportBtn.disabled = false;
+          importStatusEl.style.display = 'none';
+          lucide.createIcons();
+        } catch (err) {
+          showToast('Failed to parse CSV file: ' + err.message, 'error');
+          submitImportBtn.disabled = true;
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // File Selection & Parsing via File input
+    csvFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      handleCSVFile(file);
+    });
+
+    // Submit Import
+    submitImportBtn.addEventListener('click', async () => {
+      if (parsedMemberRows.length === 0) return;
+
+      submitImportBtn.disabled = true;
+      submitImportBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Importing Gym Data...';
+      lucide.createIcons();
+
+      const updateExisting = document.getElementById('chk-update-existing-members').checked;
+      const createSubscriptions = document.getElementById('chk-create-subs-payments').checked;
+
+      try {
+        const response = await api.post('/api/members/import-csv', {
+          members: parsedMemberRows,
+          updateExisting,
+          createSubscriptions
+        });
+
+        importStatusEl.style.display = 'block';
+        importStatusEl.style.background = 'rgba(34, 197, 94, 0.15)';
+        importStatusEl.style.border = '1px solid var(--color-success)';
+        importStatusEl.style.color = 'var(--color-success)';
+        
+        let resultMsg = `<strong>✓ Import Complete!</strong><br>`;
+        resultMsg += `• Members: <strong>${response.imported} added</strong>, <strong>${response.updated} updated</strong> (Total ${response.total} rows)<br>`;
+        if (response.subscriptions_created > 0) {
+          resultMsg += `• Subscriptions Generated: <strong>${response.subscriptions_created}</strong><br>`;
+        }
+        if (response.payments_recorded > 0) {
+          resultMsg += `• Payment Records Created: <strong>${response.payments_recorded}</strong><br>`;
+        }
+        if (response.plans_created > 0) {
+          resultMsg += `• New Packages Created: <strong>${response.plans_created}</strong><br>`;
+        }
+        if (response.errors && response.errors.length > 0) {
+          resultMsg += `• Skipped Rows: <strong>${response.errors.length}</strong>`;
+        }
+        importStatusEl.innerHTML = resultMsg;
+
+        showToast(`Successfully imported ${response.imported} members & ${response.subscriptions_created || 0} subscriptions!`, 'success');
+
+        // Reload table
+        await MembersView.fetchMembers();
+        MembersView.renderList();
+
+        setTimeout(() => {
+          importModal.classList.add('hidden');
+          submitImportBtn.innerHTML = '<i data-lucide="check"></i> Start Import';
+          submitImportBtn.disabled = false;
+        }, 2200);
+
+      } catch (err) {
+        importStatusEl.style.display = 'block';
+        importStatusEl.style.background = 'rgba(239, 68, 68, 0.15)';
+        importStatusEl.style.border = '1px solid var(--color-danger)';
+        importStatusEl.style.color = 'var(--color-danger)';
+        importStatusEl.textContent = 'Import failed: ' + err.message;
+        showToast(err.message, 'error');
+        submitImportBtn.disabled = false;
+        submitImportBtn.innerHTML = '<i data-lucide="check"></i> Retry Import';
+      }
+      lucide.createIcons();
     });
   },
   
@@ -555,6 +994,10 @@ const MembersView = {
     document.getElementById('reg-medical').value = m.medical_notes || '';
     document.getElementById('reg-emergency').value = m.emergency_contact || '';
     document.getElementById('reg-notes').value = m.notes || '';
+    const admPaidChk = document.getElementById('reg-admission-fee-paid');
+    if (admPaidChk) {
+      admPaidChk.checked = Boolean(m.admission_fee_paid === 1);
+    }
     
     const preview = document.getElementById('profile-preview');
     if (m.photo_path) {
@@ -649,6 +1092,7 @@ const MembersView = {
                 <div><span class="text-muted">Emergency Contact:</span> <strong>${m.emergency_contact || 'N/A'}</strong></div>
                 <div><span class="text-muted">Blood Group:</span> <strong>${m.blood_group || 'N/A'}</strong></div>
                 <div><span class="text-muted">Joining Date:</span> <strong>${m.joining_date || 'N/A'}</strong></div>
+                <div><span class="text-muted">Admission Fee:</span> <strong style="color:${m.admission_fee_paid ? 'var(--color-success)' : 'var(--color-warning)'};">${m.admission_fee_paid ? '✓ Paid (₹1,500)' : '⚠️ Unpaid (₹1,500 due on admission)'}</strong></div>
                 <div><span class="text-muted">Trainer Assigned:</span> <strong>${m.trainer_name || 'None'}</strong></div>
                 <div><span class="text-muted">Medical Notes:</span> <strong style="color:var(--color-primary);">${m.medical_notes || 'None'}</strong></div>
               </div>

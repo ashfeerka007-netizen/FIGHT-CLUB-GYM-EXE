@@ -30,7 +30,7 @@ INSERT INTO staff (id, fullname, role, permissions, salary, status) VALUES
 
 -- Insert Membership Plans
 INSERT INTO membership_plans (id, name, category, duration_months, price, discount, tax, final_amount, features, status) VALUES
-(1, 'Admission Fees', 'Gym', 1, 2500, 0, 0, 2500, '["One-time Admission Fee", "Registration and ID Card", "Locker activation"]', 'Active'),
+(1, 'Admission Plan (₹1500 Admission + 1 Month ₹1000)', 'Gym', 1, 2500, 0, 0, 2500, '["One-time ₹1500 Admission Fee Included", "1 Month Gym Subscription Included (₹1000)", "Registration and ID Card", "Locker activation"]', 'Active'),
 (2, 'Monthly Package', 'Gym', 1, 1000, 0, 0, 1000, '["Access to gym floor", "Cardio machines", "Free lockers"]', 'Active'),
 (3, '3 Month Package', 'Gym', 3, 4200, 0, 0, 4200, '["Access to gym floor", "Cardio machines", "Free lockers", "General trainer assistance"]', 'Active'),
 (4, '6 Month Package', 'Gym', 6, 6300, 0, 0, 6300, '["Access to gym floor", "Cardio machines", "Free lockers", "General trainer assistance"]', 'Active'),
