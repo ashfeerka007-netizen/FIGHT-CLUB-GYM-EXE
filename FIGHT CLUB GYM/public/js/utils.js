@@ -1,6 +1,10 @@
 // Shared UI Utilities for Fight Club Gym
 // Extracted here to avoid circular imports between app.js and view modules
 
+if (typeof window !== 'undefined' && typeof window.lucide === 'undefined') {
+  window.lucide = { createIcons: () => {} };
+}
+
 // ----------------------------------------------------
 // TOAST NOTIFICATIONS MANAGER
 // ----------------------------------------------------
@@ -77,6 +81,23 @@ export function showConfirm(title, message, onConfirm, confirmText = 'Delete', b
     closeModal();
     await onConfirm();
   });
+}
+
+// ----------------------------------------------------
+// OFFLINE QR CODE GENERATOR
+// ----------------------------------------------------
+export function generateQRCodeDataUrl(text, cellSize = 4, margin = 2) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.qrcode === 'function') {
+      const qr = window.qrcode(0, 'M');
+      qr.addData(text || '');
+      qr.make();
+      return qr.createDataURL(cellSize, margin);
+    }
+  } catch (err) {
+    console.warn('QR code generation error:', err);
+  }
+  return '';
 }
 
 // ----------------------------------------------------

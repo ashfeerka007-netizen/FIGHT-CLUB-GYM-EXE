@@ -1,6 +1,6 @@
 // Members Directory View for Fight Club Gym
 import api from '../api.js';
-import { showToast, showConfirm, parseCSV, downloadCSV } from '../utils.js';
+import { showToast, showConfirm, parseCSV, downloadCSV, generateQRCodeDataUrl } from '../utils.js';
 
 const MembersView = {
   members: [],
@@ -1066,6 +1066,7 @@ const MembersView = {
       const drawer = document.getElementById('drawer-body-content');
       
       const currencySymbol = '₹';
+      const qrDataUrl = generateQRCodeDataUrl(m.member_code || '', 4, 1);
       
       drawer.innerHTML = `
         <div class="member-details-layout">
@@ -1116,9 +1117,9 @@ const MembersView = {
                   </div>
                 </div>
                 
-                <!-- Barcode & QR integration -->
-                <div style="position: absolute; bottom: 10px; right: 10px; width: 50px; height: 50px; background: #fff; padding: 2px; border-radius: 3px;">
-                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${m.member_code}" style="width:100%; height:100%;" alt="QR ID">
+                <!-- Barcode & QR integration (100% Offline) -->
+                <div style="position: absolute; bottom: 10px; right: 10px; width: 50px; height: 50px; background: #fff; padding: 2px; border-radius: 3px; display: flex; align-items: center; justify-content: center;">
+                  ${qrDataUrl ? `<img src="${qrDataUrl}" style="width:100%; height:100%; object-fit:contain; image-rendering:pixelated;" alt="QR ID">` : `<span style="color:#000; font-size:9px; font-weight:bold;">${m.member_code}</span>`}
                 </div>
               </div>
               <p class="text-sm text-muted mt-md">Scanning this card checks the member in/out instantly.</p>

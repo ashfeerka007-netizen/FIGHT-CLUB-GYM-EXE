@@ -5,19 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fight Club Gym Management System</title>
   
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Local Offline Fonts -->
+  <link rel="stylesheet" href="/css/fonts.css">
   
   <!-- CSS -->
   <link rel="preload" as="image" href="/uploads/background/FIGHT_CLUB_BG.png">
   <link rel="stylesheet" href="/css/variables.css">
   <link rel="stylesheet" href="/css/styles.css">
   
-  <!-- External Libraries (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Libraries (100% Local Offline Bundles) -->
+  <script src="/js/libs/chart.min.js"></script>
+  <script src="/js/libs/lucide.min.js"></script>
+  <script src="/js/libs/qrcode.min.js"></script>
+  <script>
+    // Robust fallback in case scripts are loaded asynchronously or fail
+    if (typeof window.lucide === 'undefined') {
+      window.lucide = {
+        createIcons: function() {}
+      };
+    }
+  </script>
 </head>
 <body>
 

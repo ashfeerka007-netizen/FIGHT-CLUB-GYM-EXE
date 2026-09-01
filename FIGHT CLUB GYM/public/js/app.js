@@ -1,4 +1,7 @@
 // Main Application Entry & Controller for Fight Club Gym
+if (typeof window !== 'undefined' && typeof window.lucide === 'undefined') {
+  window.lucide = { createIcons: () => {} };
+}
 import api from './api.js';
 import { showToast as _showToast } from './utils.js';
 export { showToast, showConfirm } from './utils.js';
