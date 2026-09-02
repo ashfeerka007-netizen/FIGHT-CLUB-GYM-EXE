@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build Staging & Distribution
+dist/staging/
+dist/payload.zip
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS Files
+Thumbs.db
+.DS_Store
+*.tmp
