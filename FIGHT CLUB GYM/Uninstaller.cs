@@ -126,6 +126,12 @@ namespace FightClubGym
         {
             try
             {
+                // Safety guard: Never delete if running inside development repository
+                if (Directory.Exists(Path.Combine(appDir, ".git")) || Directory.Exists(Path.Combine(appDir, "..", ".git")))
+                {
+                    return;
+                }
+
                 string tempScript = Path.Combine(Path.GetTempPath(), "cleanup_fightclubgym.bat");
 
                 string backupCommands = "";
